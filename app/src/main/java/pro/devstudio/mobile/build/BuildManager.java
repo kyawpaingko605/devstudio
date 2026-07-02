@@ -31,7 +31,7 @@ import pro.devstudio.mobile.ai.GeminiClient;
 
 /**
  * Orchestrates the DevStudio build pipeline (No-Root Local Build System)
- * Fixed: Comprehensive LD_LIBRARY_PATH paths added to resolve dynamic linking issue (libandroid-base.so not found)
+ * Fixed: Added --manifest-package flag to AAPT2 Link to bypass AGP package restrictions in Main Manifest
  */
 public class BuildManager {
 
@@ -187,7 +187,16 @@ public class BuildManager {
                 cb.onLog("► [2/5] Linking resources and generating R.java…", LogLevel.INFO);
                 String unalignedApk = binDir + "/app-unaligned.apk";
                 
-                List<String> linkCmd = List.of(aapt2Binary.getAbsolutePath(), "link", "-I", androidJar.getAbsolutePath(), "--manifest", manifestPath, "-o", unalignedApk, "--java", genPath, intermediatesRes + "/resources.zip");
+                // Fixed: Added `--manifest-package` flag to bypass the package attribute requirement in source XML
+                List<String> linkCmd = List.of(
+                    aapt2Binary.getAbsolutePath(), "link", 
+                    "-I", androidJar.getAbsolutePath(), 
+                    "--manifest", manifestPath, 
+                    "--manifest-package", "pro.devstudio.mobile.targetapp",
+                    "-o", unalignedApk, 
+                    "--java", genPath, 
+                    intermediatesRes + "/resources.zip"
+                );
                 if (runProcess(linkCmd, projectDir, cb) != 0) { cb.onError("AAPT2 Link Failed"); return; }
 
                 // ── Step 4: Java Compilation (ECJ) ───────────────────────────
