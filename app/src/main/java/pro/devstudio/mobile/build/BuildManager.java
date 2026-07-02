@@ -31,8 +31,10 @@ import pro.devstudio.mobile.ai.GeminiClient;
 
 /**
  * Orchestrates the DevStudio build pipeline (No-Root Local Build System)
- * Fixed: Replaced with valid AAPT2 link flags (--rename-manifest-package and --warn-manifest-validation)
- * to guarantee successful local builds without disturbing AGP Gradle structure.
+ * Updated: 
+ * - Copies ALL etc/supporting files from assets.
+ * - Uses native 'dalvikvm' with proper Entry Points to execute Dexified JARs.
+ * - Hacks and restores source manifest dynamically to bypass AAPT2 package verification.
  */
 public class BuildManager {
 
@@ -62,27 +64,30 @@ public class BuildManager {
         File jarToolsDir = new File(context.getFilesDir(), "build-tools");
         if (!jarToolsDir.exists()) jarToolsDir.mkdirs();
 
-        // ၁။ .jar နှင့် .keystore ဖိုင်များကို ပုံမှန်အတိုင်း assets မှ ကူးယူမည်
+        // ၁။ ပြင်ဆင်ချက်- .jar/.keystore အပြင် assets/build-tools ထဲတွင်ရှိသမျှ အခြား etc ဖိုင်အားလုံးကိုပါ ကူးယူမည်
         String[] files = context.getAssets().list("build-tools");
         if (files != null) {
             for (String filename : files) {
-                if (filename.endsWith(".jar") || filename.endsWith(".keystore")) {
-                    File targetFile = new File(jarToolsDir, filename);
-                    if (targetFile.exists()) continue; 
+                File targetFile = new File(jarToolsDir, filename);
+                if (targetFile.exists()) continue; 
 
-                    try (InputStream in = context.getAssets().open("build-tools/" + filename);
-                         OutputStream out = new FileOutputStream(targetFile)) {
-                        byte[] buffer = new byte[4096];
-                        int read;
-                        while ((read = in.read(buffer)) != -1) {
-                            out.write(buffer, 0, read);
-                        }
+                try (InputStream in = context.getAssets().open("build-tools/" + filename);
+                     OutputStream out = new FileOutputStream(targetFile)) {
+                    byte[] buffer = new byte[4096];
+                    int read;
+                    while ((read = in.read(buffer)) != -1) {
+                        out.write(buffer, 0, read);
                     }
+                }
+                
+                // .jar သို့မဟုတ် .keystore မဟုတ်သော runtime binaries များရှိခဲ့လျှင် executable ခွင့်ပြုချက်ပေးမည်
+                if (!filename.endsWith(".jar") && !filename.endsWith(".keystore")) {
+                    targetFile.setExecutable(true, false);
                 }
             }
         }
 
-        // ၂။ [Self-Extraction] အကယ်၍ စနစ်က libaapt2.so ကို မထုတ်ပေးထားပါက APK ထဲမှ အတင်းဆွဲထုတ်မည်
+        // ၂။ [Self-Extraction] Native Core Core (libaapt2.so) အား အသုံးပြုရန် ပြင်ဆင်ခြင်း
         File secureBinDir = new File(context.getCodeCacheDir(), "bin");
         if (!secureBinDir.exists()) secureBinDir.mkdirs();
         File localAapt2 = new File(secureBinDir, "libaapt2.so");
@@ -182,30 +187,56 @@ public class BuildManager {
                 cb.onProgress("Compiling resources…", 40);
                 cb.onLog("► [1/5] Compiling resources via AAPT2…", LogLevel.INFO);
                 
+                // [Inplace Hack] AAPT2 Link error အတွက် မူရင်း Manifest ထဲသို့ Package အား ခေတ္တဝင်ထည့်ခြင်း
+                File rawManifestFile = new File(manifestPath);
+                String backupManifestContent = FileUtils.readFile(rawManifestFile);
+                try {
+                    String temporaryManifest = backupManifestContent.replace("<manifest", "<manifest package=\"pro.devstudio.mobile.targetapp\"");
+                    FileUtils.writeFile(rawManifestFile, temporaryManifest);
+                } catch (Exception e) {
+                    cb.onLog("  ✗ Source Manifest Modification Failed: " + e.getMessage(), LogLevel.ERROR);
+                    cb.onError("Manifest Inject Failed");
+                    return;
+                }
+
                 List<String> compileCmd = List.of(aapt2Binary.getAbsolutePath(), "compile", "--dir", resPath, "-o", intermediatesRes + "/resources.zip");
-                if (runProcess(compileCmd, projectDir, cb) != 0) { cb.onError("AAPT2 Compile Failed"); return; }
+                if (runProcess(compileCmd, projectDir, cb) != 0) { 
+                    FileUtils.writeFile(rawManifestFile, backupManifestContent); // ကျရှုံးလျှင်လည်း နဂိုအတိုင်းချက်ချင်းပြန်ပြင်ပေးမည်
+                    cb.onError("AAPT2 Compile Failed"); 
+                    return; 
+                }
 
                 cb.onLog("► [2/5] Linking resources and generating R.java…", LogLevel.INFO);
                 String unalignedApk = binDir + "/app-unaligned.apk";
                 
-                // Fixed/Updated: Help menu အတိုင်း --rename-manifest-package နှင့် manifest error များကို warning အဖြစ်ကျော်ရန် --warn-manifest-validation ကို တွဲသုံးထားသည်
                 List<String> linkCmd = List.of(
                     aapt2Binary.getAbsolutePath(), "link", 
                     "-I", androidJar.getAbsolutePath(), 
                     "--manifest", manifestPath, 
-                    "--rename-manifest-package", "pro.devstudio.mobile.targetapp",
-                    "--warn-manifest-validation",
                     "-o", unalignedApk, 
                     "--java", genPath, 
                     intermediatesRes + "/resources.zip"
                 );
-                if (runProcess(linkCmd, projectDir, cb) != 0) { cb.onError("AAPT2 Link Failed"); return; }
+                int linkResult = runProcess(linkCmd, projectDir, cb);
 
-                // ── Step 4: Java Compilation (ECJ) ───────────────────────────
+                // AAPT2 Link ပြီးသွားပြီဖြစ်၍ မူရင်း Manifest အား Package မပါသော သန့်ရှင်းသည့်အခြေအနေသို့ ပြန်ပြောင်းခြင်း
+                try {
+                    FileUtils.writeFile(rawManifestFile, backupManifestContent);
+                    cb.onLog("  ✓ Source Manifest restored to clean state.", LogLevel.SUCCESS);
+                } catch (Exception e) {
+                    cb.onLog("  ⚠ Failed to restore source Manifest: " + e.getMessage(), LogLevel.WARNING);
+                }
+
+                if (linkResult != 0) { cb.onError("AAPT2 Link Failed"); return; }
+
+                // ── Step 4: Java Compilation (ECJ via dalvikvm) ───────────────
                 cb.onProgress("Compiling Java code…", 60);
-                cb.onLog("► [3/5] Compiling Java source codes with ECJ…", LogLevel.INFO);
+                cb.onLog("► [3/5] Compiling Java source codes with ECJ (dalvikvm)…", LogLevel.INFO);
+                
                 List<String> ecjCmd = new ArrayList<>();
-                ecjCmd.add("java"); ecjCmd.add("-jar"); ecjCmd.add(ecjJar.getAbsolutePath());
+                ecjCmd.add("dalvikvm");
+                ecjCmd.add("-cp"); ecjCmd.add(ecjJar.getAbsolutePath());
+                ecjCmd.add("org.eclipse.jdt.internal.compiler.batch.Main"); // ECJ Main Entry
                 ecjCmd.add("-d"); ecjCmd.add(objPath);
                 ecjCmd.add("-cp"); ecjCmd.add(androidJar.getAbsolutePath());
                 ecjCmd.add("-source"); ecjCmd.add("1.8"); ecjCmd.add("-target"); ecjCmd.add("1.8");
@@ -222,14 +253,16 @@ public class BuildManager {
                     return;
                 }
 
-                // ── Step 5: DEX Conversion (D8) ──────────────────────────────
+                // ── Step 5: DEX Conversion (D8 via dalvikvm) ──────────────────
                 cb.onProgress("Converting to DEX…", 80);
-                cb.onLog("► [4/5] Converting class files to DEX (d8)…", LogLevel.INFO);
+                cb.onLog("► [4/5] Converting class files to DEX via D8 (dalvikvm)…", LogLevel.INFO);
                 String intermediatesDex = buildDir + "/intermediates/dex";
                 new File(intermediatesDex).mkdirs();
                 
                 List<String> d8Cmd = new ArrayList<>();
-                d8Cmd.add("java"); d8Cmd.add("-jar"); d8Cmd.add(d8Jar.getAbsolutePath());
+                d8Cmd.add("dalvikvm");
+                d8Cmd.add("-cp"); d8Cmd.add(d8Jar.getAbsolutePath());
+                d8Cmd.add("com.android.tools.r8.D8"); // D8 Main Entry
                 d8Cmd.add("--lib"); d8Cmd.add(androidJar.getAbsolutePath());
                 d8Cmd.add("--output"); d8Cmd.add(intermediatesDex);
                 addAllFiles(new File(objPath), ".class", d8Cmd);
@@ -253,14 +286,17 @@ public class BuildManager {
                     return;
                 }
 
-                // ── Step 6: Sign APK ─────────────────────────────────────────
+                // ── Step 6: Sign APK (APKSigner via dalvikvm) ──────────────────
                 cb.onProgress("Signing APK…", 95);
-                cb.onLog("► [5/5] Signing APK with debug.keystore…", LogLevel.INFO);
+                cb.onLog("► [5/5] Signing APK with debug.keystore (dalvikvm)…", LogLevel.INFO);
                 File releaseApk = new File(binDir, "app-release.apk");
 
                 if (apksignerJar.exists() && debugKeystore.exists()) {
                     List<String> signCmd = List.of(
-                        "java", "-jar", apksignerJar.getAbsolutePath(), "sign",
+                        "dalvikvm",
+                        "-cp", apksignerJar.getAbsolutePath(),
+                        "com.android.apksigner.ApkSignerTool", // APKSigner Main Entry
+                        "sign",
                         "--ks", debugKeystore.getAbsolutePath(),
                         "--ks-pass", "pass:android",
                         "--key-pass", "pass:android",
@@ -334,8 +370,6 @@ public class BuildManager {
         pb.directory(workingDir);
         pb.redirectErrorStream(true);
         
-        // Dynamic library ချိတ်ဆက်မှုအမှား (libandroid-base.so not found) ကို ကျော်ဖြတ်ရန်
-        // Environment ထဲတွင် လိုအပ်သော System Library လမ်းကြောင်းအားလုံးကို စုံလင်စွာ လှမ်းညွှန်းပေးခြင်း
         Map<String, String> env = pb.environment();
         String nativeLibDir = context.getApplicationInfo().nativeLibraryDir;
         
@@ -345,6 +379,11 @@ public class BuildManager {
                 + ":/system/apex/com.android.runtime/lib64:/system/apex/com.android.runtime/lib";
                 
         env.put("LD_LIBRARY_PATH", nativeLibDir + ":" + systemLibPath);
+        
+        // dalvikvm အား No-Root isolated storage ထဲတွင်သာ သီးသန့် Cache ဆောက်ခိုင်းရန်
+        File dalvikCacheDir = new File(context.getCacheDir(), "dalvik-data");
+        if (!dalvikCacheDir.exists()) dalvikCacheDir.mkdirs();
+        env.put("ANDROID_DATA", dalvikCacheDir.getAbsolutePath());
 
         Process process = pb.start();
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
