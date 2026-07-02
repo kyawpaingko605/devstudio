@@ -31,7 +31,7 @@ import pro.devstudio.mobile.ai.GeminiClient;
 
 /**
  * Orchestrates the DevStudio build pipeline (No-Root Local Build System)
- * Fixed: Self-Extraction Strategy for libaapt2.so to bypass Android 28+ restrictions
+ * Fixed: Added LD_LIBRARY_PATH to runProcess to resolve dynamic linking issue (libandroid-base.so not found)
  */
 public class BuildManager {
 
@@ -322,6 +322,15 @@ public class BuildManager {
         ProcessBuilder pb = new ProcessBuilder(command);
         pb.directory(workingDir);
         pb.redirectErrorStream(true);
+        
+        // Dynamic library ချိတ်ဆက်မှုအမှား (libandroid-base.so not found) ကို ကျော်ဖြတ်ရန်
+        // Environment ထဲတွင် လိုအပ်သော Library လမ်းကြောင်းများကို လှမ်းညွှန်းပေးခြင်း
+        Map<String, String> env = pb.environment();
+        String nativeLibDir = context.getApplicationInfo().nativeLibraryDir;
+        
+        String systemLibPath = "/system/lib64:/system/lib:/apex/com.android.runtime/lib64:/apex/com.android.runtime/lib";
+        env.put("LD_LIBRARY_PATH", nativeLibDir + ":" + systemLibPath);
+
         Process process = pb.start();
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
             String line;
