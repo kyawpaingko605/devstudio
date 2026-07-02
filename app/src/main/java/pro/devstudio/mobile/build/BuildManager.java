@@ -7,15 +7,16 @@ import org.xmlpull.v1.XmlPullParserFactory;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.StringReader;
 import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.net.URI;
 import java.nio.file.FileSystem;
-import java.nio.file.FileSystemSystems;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -34,8 +35,7 @@ import pro.devstudio.mobile.ai.GeminiClient;
 
 /**
  * Orchestrates the DevStudio build pipeline (No-Root Local Build System)
- * Updated: Replaced problematic native 'dalvikvm' process with safe In-App DexClassLoader.
- * This completely eliminates the APEX linker/symbol error.
+ * Fixed: Completely eliminated System.exit() via safe Direct In-App Core API Loading.
  */
 public class BuildManager {
 
@@ -56,6 +56,90 @@ public class BuildManager {
         this.context = context.getApplicationContext();
         this.geminiClient = new GeminiClient(this.context);
     }
+
+    // ── PROJECT GENERATION SYSTEM ────────────────────────────────────────────
+
+    /**
+     * Creates a standard Android project layout from scratch inside the app's working directory.
+     */
+    public File createNewProjectStructure(String projectName, String packageName) throws Exception {
+        File projectsDir = new File(context.getFilesDir(), "projects");
+        if (!projectsDir.exists()) projectsDir.mkdirs();
+
+        File projectRoot = new File(projectsDir, projectName);
+        String packagePath = packageName.replace(".", "/");
+        
+        File javaDir = new File(projectRoot, "app/src/main/java/" + packagePath);
+        File resLayoutDir = new File(projectRoot, "app/src/main/res/layout");
+        File resValuesDir = new File(projectRoot, "app/src/main/res/values");
+        
+        javaDir.mkdirs();
+        resLayoutDir.mkdirs();
+        resValuesDir.mkdirs();
+
+        // 1. AndroidManifest.xml
+        String manifest = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
+                "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n" +
+                "    <application\n" +
+                "        android:allowBackup=\"true\">\n" +
+                "        <activity android:name=\".MainActivity\" android:exported=\"true\">\n" +
+                "            <intent-filter>\n" +
+                "                <action android:name=\"android.intent.action.MAIN\" />\n" +
+                "                <category android:name=\"android.intent.category.LAUNCHER\" />\n" +
+                "            </intent-filter>\n" +
+                "        </activity>\n" +
+                "    </application>\n" +
+                "</manifest>";
+        writeProjectFile(new File(projectRoot, "app/src/main/AndroidManifest.xml"), manifest);
+
+        // 2. MainActivity.java
+        String javaCode = "package " + packageName + ";\n\n" +
+                "import android.app.Activity;\n" +
+                "import android.os.Bundle;\n\n" +
+                "public class MainActivity extends Activity {\n" +
+                "    @Override\n" +
+                "    protected void onCreate(Bundle savedInstanceState) {\n" +
+                "        super.onCreate(savedInstanceState);\n" +
+                "        int layoutId = getResources().getIdentifier(\"activity_main\", \"layout\", getPackageName());\n" +
+                "        setContentView(layoutId);\n" +
+                "    }\n" +
+                "}";
+        writeProjectFile(new File(javaDir, "MainActivity.java"), javaCode);
+
+        // 3. activity_main.xml
+        String layout = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
+                "<LinearLayout xmlns:android=\"http://schemas.android.com/apk/res/android\"\n" +
+                "    android:layout_width=\"match_parent\"\n" +
+                "    android:layout_height=\"match_parent\"\n" +
+                "    android:orientation=\"vertical\"\n" +
+                "    android:gravity=\"center\"\n" +
+                "    android:background=\"#FAFAFA\">\n" +
+                "\n" +
+                "    <TextView\n" +
+                "        android:layout_width=\"wrap_content\"\n" +
+                "        android:layout_height=\"wrap_content\"\n" +
+                "        android:text=\"Hello DevStudio!\"\n" +
+                "        android:textSize=\"24sp\"\n" +
+                "        android:textColor=\"#212121\"\n" +
+                "        android:textStyle=\"bold\"/>\n" +
+                "</LinearLayout>";
+        writeProjectFile(new File(resLayoutDir, "activity_main.xml"), layout);
+
+        // 4. build.gradle
+        String gradle = "plugins {\n    id 'com.android.application'\n}\n" +
+                "android {\n    namespace '" + packageName + "'\n    compileSdk 34\n}";
+        writeProjectFile(new File(projectRoot, "build.gradle"), gradle);
+
+        return projectRoot;
+    }
+
+    private void writeProjectFile(File file, String content) throws IOException {
+        try (FileWriter writer = new FileWriter(file)) {
+            writer.write(content);
+        }
+    }
+
+    // ── BUILD PIPELINE MOTOR ─────────────────────────────────────────────────
 
     public void build(Project project, File projectDir, BuildCallback cb) {
         buildInternal(project, projectDir, cb, false);
@@ -79,7 +163,6 @@ public class BuildManager {
                         out.write(buffer, 0, read);
                     }
                 }
-                
                 if (!filename.endsWith(".jar") && !filename.endsWith(".keystore")) {
                     targetFile.setExecutable(true, false);
                 }
@@ -181,7 +264,7 @@ public class BuildManager {
                 new File(intermediatesRes).mkdirs();
                 new File(binDir).mkdirs();
 
-                // ── Step 3: AAPT2 Compile & Link (AAPT2 သည် C++ Native Binary ဖြစ်၍ Process ဖြင့် ဆက်ပတ်ပါမည်) ──
+                // ── Step 3: AAPT2 Compile & Link ──────────────────────────────
                 cb.onProgress("Compiling resources…", 40);
                 cb.onLog("► [1/5] Compiling resources via AAPT2…", LogLevel.INFO);
                 
@@ -225,7 +308,7 @@ public class BuildManager {
 
                 if (linkResult != 0) { cb.onError("AAPT2 Link Failed"); return; }
 
-                // ── Step 4: Java Compilation (In-App Class Loading အသစ်ဖြင့် ပြောင်းလဲခြင်း) ──
+                // ── Step 4: Java Compilation (In-App) ─────────────────────────
                 cb.onProgress("Compiling Java code…", 60);
                 cb.onLog("► [3/5] Compiling Java source codes with In-App ECJ Tool…", LogLevel.INFO);
                 
@@ -248,7 +331,7 @@ public class BuildManager {
                     return;
                 }
 
-                // ── Step 5: DEX Conversion (In-App D8 Tool ဖြင့် ပြောင်းလဲခြင်း) ──
+                // ── Step 5: DEX Conversion (In-App) ───────────────────────────
                 cb.onProgress("Converting to DEX…", 80);
                 cb.onLog("► [4/5] Converting class files to DEX via In-App D8 Tool…", LogLevel.INFO);
                 String intermediatesDex = buildDir + "/intermediates/dex";
@@ -279,7 +362,7 @@ public class BuildManager {
                     return;
                 }
 
-                // ── Step 6: Sign APK (In-App ApkSigner Tool ဖြင့် ပြောင်းလဲခြင်း) ──
+                // ── Step 6: Sign APK (In-App) ─────────────────────────────────
                 cb.onProgress("Signing APK…", 95);
                 cb.onLog("► [5/5] Signing APK with debug.keystore…", LogLevel.INFO);
                 File releaseApk = new File(binDir, "app-release.apk");
@@ -322,16 +405,14 @@ public class BuildManager {
     }
 
     /**
-     * 💡 Core Magic Strategy:
-     * Loads the dexified compiler JARs directly inside the App's own Process.
-     * Bypasses 'dalvikvm' completely, resolving all APEX/Library namespace symbol crashes.
+     * Safe In-App Execution Runner.
+     * Uses strict Primitive Reflection to avoid ClassNotFound errors at runtime.
      */
     private boolean runJarMainInApp(File jarFile, String mainClassName, String[] args, BuildCallback cb) {
         try {
             File optimizedDir = new File(context.getCacheDir(), "dex-opt");
             if (!optimizedDir.exists()) optimizedDir.mkdirs();
 
-            // DexClassLoader ဖြင့် Runtime ၌ JAR အား ဆွဲတင်ခြင်း
             DexClassLoader classLoader = new DexClassLoader(
                 jarFile.getAbsolutePath(),
                 optimizedDir.getAbsolutePath(),
@@ -339,18 +420,80 @@ public class BuildManager {
                 ClassLoader.getSystemClassLoader()
             );
 
-            Class<?> mainClass = classLoader.loadClass(mainClassName);
-            Method mainMethod = mainClass.getMethod("main", String[].class);
+            java.io.StringWriter outWriter = new java.io.StringWriter();
+            java.io.StringWriter errWriter = new java.io.StringWriter();
+            java.io.PrintWriter outPrintWriter = new java.io.PrintWriter(outWriter);
+            java.io.PrintWriter errPrintWriter = new java.io.PrintWriter(errWriter);
 
-            // Output Log များကို ကြားဖြတ်ဖမ်းယူရန် System.out ကို ခေတ္တပြောင်းလဲခြင်း (Optional)
-            mainMethod.invoke(null, (Object) args);
-            return true;
+            if (mainClassName.contains("org.eclipse.jdt")) {
+                // ECJ Core Reflection: Loads BatchCompiler safely without class cast crashes
+                Class<?> batchCompilerClass = classLoader.loadClass("org.eclipse.jdt.core.compiler.batch.BatchCompiler");
+                Class<?> progressClass = classLoader.loadClass("org.eclipse.jdt.core.compiler.CompilationProgress");
+                
+                Method compileMethod = batchCompilerClass.getMethod("compile", 
+                    String[].class, java.io.PrintWriter.class, java.io.PrintWriter.class, progressClass);
+                
+                boolean success = (boolean) compileMethod.invoke(null, args, outPrintWriter, errPrintWriter, null);
+                flushLogsToCallback(outWriter, errWriter, cb);
+                return success;
+
+            } else if (mainClassName.contains("com.android.tools.r8.D8")) {
+                // D8 Code Processing via system proxy interface targeting diagnostics handler
+                Class<?> d8Class = classLoader.loadClass("com.android.tools.r8.D8");
+                Class<?> d8CommandClass = classLoader.loadClass("com.android.tools.r8.D8Command");
+                Class<?> diagnosticsHandlerClass = classLoader.loadClass("com.android.tools.r8.DiagnosticsHandler");
+                
+                Method parseMethod = d8CommandClass.getMethod("parse", String[].class, diagnosticsHandlerClass);
+                
+                Object diagnosticsHandler = Proxy.newProxyInstance(
+                    classLoader,
+                    new Class<?>[]{diagnosticsHandlerClass},
+                    (proxy, method, methodArgs) -> null
+                );
+                
+                Object command = parseMethod.invoke(null, args, diagnosticsHandler);
+                Method runMethod = d8Class.getMethod("run", d8CommandClass);
+                runMethod.invoke(null, command);
+                return true;
+
+            } else {
+                // For general command-line execution blocks like ApkSignerTool
+                Class<?> mainClass = classLoader.loadClass(mainClassName);
+                Method mainMethod = mainClass.getMethod("main", String[].class);
+                
+                java.io.PrintStream originalOut = System.out;
+                java.io.PrintStream originalErr = System.err;
+                java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                java.io.PrintStream customPS = new java.io.PrintStream(baos);
+                
+                System.setOut(customPS);
+                System.setErr(customPS);
+                try {
+                    mainMethod.invoke(null, (Object) args);
+                } finally {
+                    System.setOut(originalOut);
+                    System.setErr(originalErr);
+                    String logOutput = baos.toString();
+                    if (!logOutput.isBlank()) cb.onLog(logOutput, LogLevel.INFO);
+                }
+                return true;
+            }
+
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            cb.onLog("  ✗ Process Interrupted: " + (cause != null ? cause.getMessage() : e.getMessage()), LogLevel.ERROR);
+            return false;
         } catch (Exception e) {
-            // Reflection သို့မဟုတ် Execution အမှားများကို ခြေရာခံခြင်း
-            Throwable cause = e.getCause() != null ? e.getCause() : e;
-            cb.onLog("  ✗ Internal Compiler Error [" + mainClassName + "]: " + cause.getMessage(), LogLevel.ERROR);
+            cb.onLog("  ✗ Local Runtime Reflection Link Error: " + e.getMessage(), LogLevel.ERROR);
             return false;
         }
+    }
+
+    private void flushLogsToCallback(java.io.StringWriter out, java.io.StringWriter err, BuildCallback cb) {
+        String outStr = out.toString();
+        String errStr = err.toString();
+        if (!outStr.isBlank()) cb.onLog(outStr, LogLevel.INFO);
+        if (!errStr.isBlank()) cb.onLog(errStr, LogLevel.ERROR);
     }
 
     private void triggerAiAutoFix(Project project, File projectDir, BuildCallback cb) {
