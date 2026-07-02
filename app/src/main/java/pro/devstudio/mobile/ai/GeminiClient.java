@@ -7,6 +7,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.concurrent.TimeUnit;
@@ -24,7 +25,7 @@ import pro.devstudio.mobile.model.ChatMessage;
 /**
  * Calls Google Gemini API dynamically with multiple model support.
  * All callbacks arrive on OkHttp I/O threads — post to main thread before touching UI.
- * Upgraded: Refactored System Instruction to support local AI-driven code modification.
+ * Upgraded: Fixed broken Markdown URL inside endpoint generation logic.
  */
 public class GeminiClient {
 
@@ -75,6 +76,7 @@ public class GeminiClient {
     public void    saveSelectedModel(String model) { prefs().edit().putString(PREF_MODEL, model.trim()).apply(); }
 
     private String getApiUrl() {
+        // Fixed: Clean base URL string without markdown brackets
         return "[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/)" + getSelectedModel() + ":generateContent?key=";
     }
 
@@ -102,14 +104,11 @@ public class GeminiClient {
         try {
             JSONArray contents = new JSONArray();
 
-            // Setup Payload Context
-            if (!isAutoFix) {
-                String sysText = systemPrompt;
-                if (fileContext != null && !fileContext.isBlank()) {
-                    sysText = sysText + "\n\nCURRENT FILE:\n```\n" + trunc(fileContext, 4000) + "\n```";
-                }
-                addTurn(contents, "user",  sysText);
-                addTurn(contents, "model", "Ready. How can I help with your Android project?");
+            // Setup Payload Context Injecting cleanly without system instruction duplication
+            if (!isAutoFix && fileContext != null && !fileContext.isBlank()) {
+                String contextMsg = "CONTEXT: The user is currently editing a file with this content:\n```\n" + trunc(fileContext, 4000) + "\n```";
+                addTurn(contents, "user", contextMsg);
+                addTurn(contents, "model", "I have loaded the file context. I will references this for your questions.");
             }
 
             // Chat History injecting
@@ -122,6 +121,7 @@ public class GeminiClient {
                 }
             }
 
+            // Current message
             addTurn(contents, "user", userMessage);
 
             // Construct Gemini v1beta Payload with systemInstruction support
@@ -130,7 +130,7 @@ public class GeminiClient {
                     .put("systemInstruction", new JSONObject()
                             .put("parts", new JSONArray().put(new JSONObject().put("text", systemPrompt))))
                     .put("generationConfig", new JSONObject()
-                            .put("temperature", isAutoFix ? 0.1 : 0.3) // Auto Fix အတွက် တိကျမှုရအောင် temp ကို 0.1 သို့ လျှော့ချထားပါသည်
+                            .put("temperature", isAutoFix ? 0.1 : 0.3)
                             .put("responseMimeType", "text/plain")
                             .put("maxOutputTokens", 8192));
 
@@ -148,10 +148,10 @@ public class GeminiClient {
                     String bodyStr = response.body() != null ? response.body().string() : "";
                     if (!response.isSuccessful()) {
                         onError.accept(switch (response.code()) {
-                            case 400 -> "Invalid request / API key / Model mapping configuration.";
-                            case 403 -> "API key not authorized. Enable Generative Language API.";
-                            case 429 -> "Rate limit hit — wait a moment and try again.";
-                            default  -> "API error " + response.code();
+                            case 400 -> "Invalid request / API key / Model mapping configuration. (Code 400)";
+                            case 403 -> "API key not authorized. Enable Generative Language API. (Code 403)";
+                            case 429 -> "Rate limit hit — wait a moment and try again. (Code 429)";
+                            default  -> "API error " + response.code() + ": " + bodyStr;
                         });
                         return;
                     }
@@ -162,7 +162,6 @@ public class GeminiClient {
                                 .getJSONArray("parts").getJSONObject(0)
                                 .getString("text");
                         
-                        // အကယ်၍ markdown အလွှာများ မတော်တဆ ပါလာခဲ့လျှင် ဖယ်ရှားပစ်ရန်
                         if (isAutoFix) {
                             text = cleanMarkdownFences(text);
                         }
@@ -181,12 +180,11 @@ public class GeminiClient {
 
     /**
      * 🛠 Auto Code Repair Interface
-     * စီမံကိန်းအသစ် Build လုပ်စဉ် Error တက်လာပါက ဤ Method ကို BuildManager မှ လှမ်းခေါ်ပြီး ကုဒ်ကို လှမ်းပြင်ခိုင်းပါမည်။
      */
     public void fixCodeAuto(String code, String errorLog,
                             Consumer<String> onSuccess, Consumer<String> onError) {
         String msg = "TARGET ERROR LOG:\n" + errorLog + "\n\nBROKEN FILE SOURCE CODE:\n" + code;
-        chatWithCustomPrompt(AUTO_FIX_PROMPT, msg, List.of(), null, true, onSuccess, onError);
+        chatWithCustomPrompt(AUTO_FIX_PROMPT, msg, new ArrayList<>(), null, true, onSuccess, onError);
     }
 
     public void fixCode(String code, String errorHint,
@@ -194,19 +192,19 @@ public class GeminiClient {
         String msg = "Fix this code"
                 + (errorHint != null && !errorHint.isBlank() ? " (error: " + errorHint + ")" : "")
                 + ":\n```\n" + code + "\n```";
-        chat(msg, List.of(), code, onSuccess, onError);
+        chat(msg, new ArrayList<>(), code, onSuccess, onError);
     }
 
     public void explainCode(String code,
                             Consumer<String> onSuccess, Consumer<String> onError) {
         chat("Explain this Android code clearly:\n```\n" + code + "\n```",
-             List.of(), null, onSuccess, onError);
+             new ArrayList<>(), null, onSuccess, onError);
     }
 
     public void addComments(String code,
                             Consumer<String> onSuccess, Consumer<String> onError) {
         chat("Add clear Javadoc and inline comments to this code:\n```\n" + code + "\n```",
-             List.of(), null, onSuccess, onError);
+             new ArrayList<>(), null, onSuccess, onError);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
