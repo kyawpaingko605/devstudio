@@ -31,7 +31,8 @@ import pro.devstudio.mobile.ai.GeminiClient;
 
 /**
  * Orchestrates the DevStudio build pipeline (No-Root Local Build System)
- * Fixed: Added --manifest-package flag to AAPT2 Link to bypass AGP package restrictions in Main Manifest
+ * Fixed: Replaced with valid AAPT2 link flags (--rename-manifest-package and --warn-manifest-validation)
+ * to guarantee successful local builds without disturbing AGP Gradle structure.
  */
 public class BuildManager {
 
@@ -187,12 +188,13 @@ public class BuildManager {
                 cb.onLog("► [2/5] Linking resources and generating R.java…", LogLevel.INFO);
                 String unalignedApk = binDir + "/app-unaligned.apk";
                 
-                // Fixed: Added `--manifest-package` flag to bypass the package attribute requirement in source XML
+                // Fixed/Updated: Help menu အတိုင်း --rename-manifest-package နှင့် manifest error များကို warning အဖြစ်ကျော်ရန် --warn-manifest-validation ကို တွဲသုံးထားသည်
                 List<String> linkCmd = List.of(
                     aapt2Binary.getAbsolutePath(), "link", 
                     "-I", androidJar.getAbsolutePath(), 
                     "--manifest", manifestPath, 
-                    "--manifest-package", "pro.devstudio.mobile.targetapp",
+                    "--rename-manifest-package", "pro.devstudio.mobile.targetapp",
+                    "--warn-manifest-validation",
                     "-o", unalignedApk, 
                     "--java", genPath, 
                     intermediatesRes + "/resources.zip"
