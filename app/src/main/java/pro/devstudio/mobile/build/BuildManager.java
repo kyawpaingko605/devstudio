@@ -31,7 +31,7 @@ import pro.devstudio.mobile.ai.GeminiClient;
 
 /**
  * Orchestrates the DevStudio build pipeline (No-Root Local Build System)
- * Fixed: Robust Fallback Path Strategy for libaapt2.so (Fixes Error=2 No such file)
+ * Fixed: Self-Extraction Strategy for libaapt2.so to bypass Android 28+ restrictions
  */
 public class BuildManager {
 
@@ -61,24 +61,53 @@ public class BuildManager {
         File jarToolsDir = new File(context.getFilesDir(), "build-tools");
         if (!jarToolsDir.exists()) jarToolsDir.mkdirs();
 
+        // ၁။ .jar နှင့် .keystore ဖိုင်များကို ပုံမှန်အတိုင်း assets မှ ကူးယူမည်
         String[] files = context.getAssets().list("build-tools");
-        if (files == null) return;
+        if (files != null) {
+            for (String filename : files) {
+                if (filename.endsWith(".jar") || filename.endsWith(".keystore")) {
+                    File targetFile = new File(jarToolsDir, filename);
+                    if (targetFile.exists()) continue; 
 
-        for (String filename : files) {
-            // .jar နှင့် .keystore ဖိုင်များကိုသာ internal storage သို့ ကူးထည့်မည်
-            if (filename.endsWith(".jar") || filename.endsWith(".keystore")) {
-                File targetFile = new File(jarToolsDir, filename);
-                if (targetFile.exists()) continue; 
+                    try (InputStream in = context.getAssets().open("build-tools/" + filename);
+                         OutputStream out = new FileOutputStream(targetFile)) {
+                        byte[] buffer = new byte[4096];
+                        int read;
+                        while ((read = in.read(buffer)) != -1) {
+                            out.write(buffer, 0, read);
+                        }
+                    }
+                }
+            }
+        }
 
-                try (InputStream in = context.getAssets().open("build-tools/" + filename);
-                     OutputStream out = new FileOutputStream(targetFile)) {
+        // ၂။ [Self-Extraction] အကယ်၍ စနစ်က libaapt2.so ကို မထုတ်ပေးထားပါက APK ထဲမှ အတင်းဆွဲထုတ်မည်
+        File secureBinDir = new File(context.getCodeCacheDir(), "bin");
+        if (!secureBinDir.exists()) secureBinDir.mkdirs();
+        File localAapt2 = new File(secureBinDir, "libaapt2.so");
+
+        String nativeLibDir = context.getApplicationInfo().nativeLibraryDir;
+        File systemAapt2 = new File(nativeLibDir, "libaapt2.so");
+
+        if (!systemAapt2.exists() && !localAapt2.exists()) {
+            java.util.zip.ZipFile apkZip = new java.util.zip.ZipFile(context.getApplicationInfo().sourceDir);
+            java.util.zip.ZipEntry entry = apkZip.getEntry("lib/arm64-v8a/libaapt2.so");
+            if (entry == null) entry = apkZip.getEntry("lib/armeabi-v7a/libaapt2.so");
+
+            if (entry != null) {
+                try (InputStream in = apkZip.getInputStream(entry);
+                     OutputStream out = new FileOutputStream(localAapt2)) {
                     byte[] buffer = new byte[4096];
                     int read;
                     while ((read = in.read(buffer)) != -1) {
                         out.write(buffer, 0, read);
                     }
                 }
+                localAapt2.setExecutable(true, false);
             }
+            apkZip.close();
+        } else if (localAapt2.exists()) {
+            localAapt2.setExecutable(true, false);
         }
     }
 
@@ -94,38 +123,19 @@ public class BuildManager {
                 cb.onLog("► Preparing local build tools from assets…", LogLevel.INFO);
                 prepareLocalTools(cb);
                 
-                // ၁။ ပထမဦးစွာ စနစ်က သတ်မှတ်ပေးထားတဲ့ အဓိက Native Library လမ်းကြောင်းကို စစ်ဆေးမည်
                 String nativeLibDir = context.getApplicationInfo().nativeLibraryDir;
                 File aapt2Binary = new File(nativeLibDir, "libaapt2.so"); 
 
-                // ၂။ Fallback 1: အကယ်၍ ရှာမတွေ့ပါက /lib/arm64 သို့မဟုတ် /lib/arm လမ်းကြောင်းများကို ထပ်မံရှာဖွေမည်
                 if (!aapt2Binary.exists()) {
-                    File apkDir = new File(context.getApplicationInfo().sourceDir).getParentFile();
-                    File arm64Lib = new File(apkDir, "lib/arm64/libaapt2.so");
-                    File armLib = new File(apkDir, "lib/arm/libaapt2.so");
-                    
-                    if (arm64Lib.exists()) {
-                        aapt2Binary = arm64Lib;
-                    } else if (armLib.exists()) {
-                        aapt2Binary = armLib;
-                    }
-                }
-
-                // ၃။ Fallback 2: တကယ်လို့ စနစ်က လုံးဝရှာမတွေ့ပါက App data အောက်က တိုက်ရိုက်လမ်းကြောင်းကို စစ်မည်
-                if (!aapt2Binary.exists()) {
-                    String dataDir = context.getApplicationInfo().dataDir;
-                    File alternative = new File(dataDir, "lib/libaapt2.so");
-                    if (alternative.exists()) {
-                        aapt2Binary = alternative;
-                    }
+                    aapt2Binary = new File(context.getCodeCacheDir(), "bin/libaapt2.so");
                 }
                 
-                // လုံးဝရှာမတွေ့ပါက စာမျက်နှာပေါ်တွင် ပြတ်ပြတ်သားသား သတိပေးချက်ပြမည်
                 if (!aapt2Binary.exists()) {
-                    cb.onLog("  ✗ Critical Error: libaapt2.so not found anywhere! Looked in: " + nativeLibDir, LogLevel.ERROR);
+                    cb.onLog("  ✗ Critical Error: libaapt2.so not found anywhere!", LogLevel.ERROR);
                     cb.onError("Missing Native Core (libaapt2.so)");
                     return;
                 } else {
+                    aapt2Binary.setExecutable(true, false);
                     cb.onLog("  ✓ Found Core Binary at: " + aapt2Binary.getAbsolutePath(), LogLevel.SUCCESS);
                 }
 
