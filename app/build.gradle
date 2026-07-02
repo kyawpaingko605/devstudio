@@ -40,23 +40,25 @@ android {
         }
         debug {
             // App not installed (Invalid Package) မဖြစ်စေရန် suffix ကို ပိတ်ထားလိုက်ပါသည်
-            versionNameSuffix "-debug"
+            // တကယ်လို့ debug workflow မှာ suffix လိုအပ်ရင် ဖြည့်နိုင်သော်လည်း လက်ရှိ ဖယ်ထားခြင်းက စိတ်ချရဆုံးပါ
         }
     }
 
     compileOptions {
-        // Core library desugaring ကို true ပေးလိုက်ပါတယ်
+        // Core library desugaring ကို true ပေးလိုက်ပါတယ် (Java 8 API backporting အတွက်)
         coreLibraryDesugaringEnabled true
 
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
+        // 💡 Local ECJ / d8 Compiler နှင့် အံဝင်ခွင်ကျဖြစ်စေရန် VERSION_1_8 သို့မဟုတ် VERSION_11 သို့ ညှိပေးခြင်း
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
     }
 
     buildFeatures {
         viewBinding true
     }
 
-    packagingOptions {
+    // 💡 Gradle ဗားရှင်းအသစ်များနှင့် ကိုက်ညီအောင် packaging အဖြစ် ပြောင်းလဲပြင်ဆင်ခြင်း
+    packaging {
         resources {
             excludes += ['META-INF/**.kotlin_module']
         }
@@ -67,7 +69,7 @@ dependencies {
     // Desugaring Library (sora-editor error မတက်စေရန် ထည့်ပေးထားပါသည်)
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
 
-    // AndroidX
+    // AndroidX Core & Layout Components
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'androidx.core:core:1.12.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
@@ -76,7 +78,7 @@ dependencies {
     implementation 'androidx.drawerlayout:drawerlayout:1.2.0'
     implementation 'androidx.coordinatorlayout:coordinatorlayout:1.2.0'
 
-    // Material 3
+    // Material 3 UI Component Design
     implementation 'com.google.android.material:material:1.11.0'
 
     // Sora Code Editor — syntax highlighting for XML & Java
@@ -84,9 +86,9 @@ dependencies {
     implementation "io.github.Rosemoe.sora-editor:language-java:0.23.4"
     implementation "io.github.Rosemoe.sora-editor:language-textmate:0.23.4"
 
-    // Networking (Gemini AI)
+    // Networking (Gemini AI Client Connections)
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 
-    // JSON
+    // JSON Parser
     implementation 'com.google.code.gson:gson:2.10.1'
 }
