@@ -35,7 +35,7 @@ import pro.devstudio.mobile.ai.GeminiClient;
 
 /**
  * Orchestrates the DevStudio build pipeline (No-Root Local Build System)
- * Fixed: Completely eliminated System.exit() via safe Direct In-App Core API Loading.
+ * Upgraded: Built-in 100% buildable core Framework project layout structure to support clean CRUD file operations.
  */
 public class BuildManager {
 
@@ -61,6 +61,7 @@ public class BuildManager {
 
     /**
      * Creates a standard Android project layout from scratch inside the app's working directory.
+     * Fixed: Uses core Material theme to prevent resource linking error without needing AndroidX AAR dependencies.
      */
     public File createNewProjectStructure(String projectName, String packageName) throws Exception {
         File projectsDir = new File(context.getFilesDir(), "projects");
@@ -72,16 +73,20 @@ public class BuildManager {
         File javaDir = new File(projectRoot, "app/src/main/java/" + packagePath);
         File resLayoutDir = new File(projectRoot, "app/src/main/res/layout");
         File resValuesDir = new File(projectRoot, "app/src/main/res/values");
+        File resDrawableDir = new File(projectRoot, "app/src/main/res/drawable");
         
         javaDir.mkdirs();
         resLayoutDir.mkdirs();
         resValuesDir.mkdirs();
+        resDrawableDir.mkdirs();
 
-        // 1. AndroidManifest.xml
+        // 1. AndroidManifest.xml (Injected default Core FrameWork Theme to make it compatible with standalone android.jar)
         String manifest = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
                 "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n" +
                 "    <application\n" +
-                "        android:allowBackup=\"true\">\n" +
+                "        android:allowBackup=\"true\"\n" +
+                "        android:label=\"@string/app_name\"\n" +
+                "        android:theme=\"@android:style/Theme.Material.Light.DarkActionBar\">\n" +
                 "        <activity android:name=\".MainActivity\" android:exported=\"true\">\n" +
                 "            <intent-filter>\n" +
                 "                <action android:name=\"android.intent.action.MAIN\" />\n" +
@@ -95,13 +100,21 @@ public class BuildManager {
         // 2. MainActivity.java
         String javaCode = "package " + packageName + ";\n\n" +
                 "import android.app.Activity;\n" +
-                "import android.os.Bundle;\n\n" +
+                "import android.os.Bundle;\n" +
+                "import android.widget.TextView;\n\n" +
                 "public class MainActivity extends Activity {\n" +
                 "    @Override\n" +
                 "    protected void onCreate(Bundle savedInstanceState) {\n" +
                 "        super.onCreate(savedInstanceState);\n" +
                 "        int layoutId = getResources().getIdentifier(\"activity_main\", \"layout\", getPackageName());\n" +
                 "        setContentView(layoutId);\n" +
+                "        \n" +
+                "        int tvId = getResources().getIdentifier(\"tv_hello\", \"id\", getPackageName());\n" +
+                "        TextView tv = findViewById(tvId);\n" +
+                "        if (tv != null) {\n" +
+                "            int stringId = getResources().getIdentifier(\"welcome_msg\", \"string\", getPackageName());\n" +
+                "            tv.setText(getString(stringId));\n" +
+                "        }\n" +
                 "    }\n" +
                 "}";
         writeProjectFile(new File(javaDir, "MainActivity.java"), javaCode);
@@ -116,6 +129,7 @@ public class BuildManager {
                 "    android:background=\"#FAFAFA\">\n" +
                 "\n" +
                 "    <TextView\n" +
+                "        android:id=\"@+id/tv_hello\"\n" +
                 "        android:layout_width=\"wrap_content\"\n" +
                 "        android:layout_height=\"wrap_content\"\n" +
                 "        android:text=\"Hello DevStudio!\"\n" +
@@ -125,7 +139,15 @@ public class BuildManager {
                 "</LinearLayout>";
         writeProjectFile(new File(resLayoutDir, "activity_main.xml"), layout);
 
-        // 4. build.gradle
+        // 4. res/values/strings.xml (Allows testing CRUD string modifications)
+        String stringsXml = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
+                "<resources>\n" +
+                "    <string name=\"app_name\">" + projectName + "</string>\n" +
+                "    <string name=\"welcome_msg\">Build Successful inside DevStudio!</string>\n" +
+                "</resources>";
+        writeProjectFile(new File(resValuesDir, "strings.xml"), stringsXml);
+
+        // 5. build.gradle
         String gradle = "plugins {\n    id 'com.android.application'\n}\n" +
                 "android {\n    namespace '" + packageName + "'\n    compileSdk 34\n}";
         writeProjectFile(new File(projectRoot, "build.gradle"), gradle);
@@ -404,10 +426,6 @@ public class BuildManager {
         });
     }
 
-    /**
-     * Safe In-App Execution Runner.
-     * Uses strict Primitive Reflection to avoid ClassNotFound errors at runtime.
-     */
     private boolean runJarMainInApp(File jarFile, String mainClassName, String[] args, BuildCallback cb) {
         try {
             File optimizedDir = new File(context.getCacheDir(), "dex-opt");
@@ -426,7 +444,6 @@ public class BuildManager {
             java.io.PrintWriter errPrintWriter = new java.io.PrintWriter(errWriter);
 
             if (mainClassName.contains("org.eclipse.jdt")) {
-                // ECJ Core Reflection: Loads BatchCompiler safely without class cast crashes
                 Class<?> batchCompilerClass = classLoader.loadClass("org.eclipse.jdt.core.compiler.batch.BatchCompiler");
                 Class<?> progressClass = classLoader.loadClass("org.eclipse.jdt.core.compiler.CompilationProgress");
                 
@@ -438,7 +455,6 @@ public class BuildManager {
                 return success;
 
             } else if (mainClassName.contains("com.android.tools.r8.D8")) {
-                // D8 Code Processing via system proxy interface targeting diagnostics handler
                 Class<?> d8Class = classLoader.loadClass("com.android.tools.r8.D8");
                 Class<?> d8CommandClass = classLoader.loadClass("com.android.tools.r8.D8Command");
                 Class<?> diagnosticsHandlerClass = classLoader.loadClass("com.android.tools.r8.DiagnosticsHandler");
@@ -457,7 +473,6 @@ public class BuildManager {
                 return true;
 
             } else {
-                // For general command-line execution blocks like ApkSignerTool
                 Class<?> mainClass = classLoader.loadClass(mainClassName);
                 Method mainMethod = mainClass.getMethod("main", String[].class);
                 
