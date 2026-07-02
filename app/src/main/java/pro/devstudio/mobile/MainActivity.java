@@ -96,7 +96,7 @@ public class MainActivity extends AppCompatActivity {
 
         updateEmptyState();
 
-        // ── Welcome Screen Buttons Click Listeners (View Binding ဖြင့် သန့်ရှင်းစွာ ပြင်ဆင်ပြီး) ──
+        // ── Welcome Screen Buttons Click Listeners ──
         binding.btnNewProject.setOnClickListener(v -> showNewProjectDialog());
         binding.btnOpenProject.setOnClickListener(v -> openSystemFolderPicker());
 
@@ -112,29 +112,6 @@ public class MainActivity extends AppCompatActivity {
             }
             return false;
         });
-
-        // အက်ပ်စဖွင့်သည်နှင့် Termux ရှိ၊ မရှိ စစ်ဆေးရန် ထည့်သွင်းချက်
-        checkAndPromptTermux();
-    }
-
-    // ── Termux Availability Check ────────────────────────────────────────────
-
-    private void checkAndPromptTermux() {
-        try {
-            getPackageManager().getPackageInfo("com.termux", 0);
-        } catch (android.content.pm.PackageManager.NameNotFoundException e) {
-            new MaterialAlertDialogBuilder(this, R.style.Dialog_DevStudio)
-                .setTitle("Termux လိုအပ်ပါသည်")
-                .setMessage("APK/AAB ထုတ်လုပ်နိုင်ရန်အတွက် Termux အက်ပလီကေးရှင်းကို ဖုန်းထဲတွင် ထည့်သွင်းထားရန် လိုအပ်ပါသည်။ အခုပဲ F-Droid ကနေ ဒေါင်းလုဒ်ဆွဲမလား?")
-                .setPositiveButton("ဒေါင်းလုဒ်ဆွဲမည်", (dialog, which) -> {
-                    String termuxFidroidUrl = "https://f-droid.org/packages/com.termux/";
-                    Intent intent = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(termuxFidroidUrl));
-                    startActivity(intent);
-                })
-                .setNegativeButton("မလုပ်သေးပါ", null)
-                .setCancelable(false)
-                .show();
-        }
     }
 
     // ── New project ──────────────────────────────────────────────────────────
@@ -192,22 +169,20 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ── External Folder Picker Logic (Android 11+ Storage စနစ်အတိုင်း ပြင်ဆင်ပြီး) ──
+    // ── External Folder Picker Logic (Android 11+ Storage စနစ်အတိုင်း) ──
 
     private void openSystemFolderPicker() {
-        // Document Tree (Folder Picker) ကို သုံးပြီး External Android Project များကို လှမ်းယူခြင်း
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
         folderPickerLauncher.launch(intent);
     }
 
     private void handleOpenExternalProject(Uri treeUri) {
-        // Content Uri သို့ပြောင်းလဲလိုက်သဖြင့် Android 11+ တွင် File Crash မဖြစ်တော့ပါ
         String projectUriString = treeUri.toString();
         toast("Loading External Project...");
 
         Intent intent = new Intent(this, EditorActivity.class);
         intent.putExtra("project_name", "External Project");
-        intent.putExtra("project_dir", projectUriString); // Path အစား Uri String သယ်ဆောင်သွားမည်
+        intent.putExtra("project_dir", projectUriString); 
         intent.putExtra("project_accent", "#3574F0");
         startActivity(intent);
         overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
