@@ -24,7 +24,7 @@ import pro.devstudio.mobile.model.ChatMessage;
 /**
  * Calls Google Gemini API dynamically with multiple model support.
  * All callbacks arrive on OkHttp I/O threads — post to main thread before touching UI.
- * Fixed: Replaced markdown URL with raw string endpoint.
+ * Upgraded: Refactored System Instruction to support local AI-driven code modification.
  */
 public class GeminiClient {
 
@@ -33,24 +33,25 @@ public class GeminiClient {
     private static final String PREF_MODEL   = "gemini_model";
     private static final MediaType JSON      = MediaType.get("application/json; charset=utf-8");
 
+    // Chat စနစ်အတွက် ကူညီပေးမည့် Assistant prompt
     private static final String SYSTEM_PROMPT =
             "You are an expert Android developer assistant inside DevStudio Mobile IDE.\n" +
             "Help the user write clean Java/Kotlin code and XML layouts for Android apps.\n" +
             "- Be concise and direct.\n" +
             "- Show code in fenced code blocks.\n" +
             "- Prefer Java unless Kotlin is requested.\n" +
-            "- When fixing bugs, briefly explain the root cause first.\n" +
             "- Format your response for comfortable mobile reading.";
 
+    // 🚀 Local Build Error တက်လျှင် AI မှ ဖိုင်ထဲသို့ တိုက်ရိုက်ဝင်ပြင်ပေးရန် အဓိက Instruction
     private static final String AUTO_FIX_PROMPT =
-            "You are an expert Android developer tool.\n" +
-            "Analyze the provided Android build error log and the source code.\n" +
-            "Fix the error and return ONLY the corrected, complete, deployable Java/Kotlin source code.\n" +
-            "STRICT RULES:\n" +
-            "- Do NOT include any introductory or concluding text.\n" +
-            "- Do NOT explain the changes or the bug.\n" +
-            "- Do NOT use markdown code fences (like ```java or ```).\n" +
-            "- Reply ONLY with the raw source code text that can be saved directly into a file.";
+            "You are an automated code repair tool embedded within the DevStudio Android IDE compiler system.\n" +
+            "Your task is to solve local compile errors during the project build process.\n" +
+            "CRITICAL INSTRUCTIONS:\n" +
+            "- Analyze the build error log and the source code meticulously.\n" +
+            "- Repair syntax errors, missing variables, type mismatches, or faulty declarations.\n" +
+            "- Output ONLY the corrected, full, deployable source code.\n" +
+            "- Never wrap code inside markdown formatting (such as ```java) or add conversational greetings.\n" +
+            "- Your output must immediately be compilable when dumped straight to a physical disk.";
 
     private final OkHttpClient http;
     private final Context      context;
@@ -65,16 +66,16 @@ public class GeminiClient {
 
     // ── API Key & Model Configuration ────────────────────────────────────────
 
-    public String  getApiKey()       { return prefs().getString(PREF_API_KEY, ""); }
-    public boolean hasApiKey()       { return !getApiKey().isEmpty(); }
+    public String  getApiKey()          { return prefs().getString(PREF_API_KEY, ""); }
+    public boolean hasApiKey()          { return !getApiKey().isEmpty(); }
     public void    saveApiKey(String k) { prefs().edit().putString(PREF_API_KEY, k.trim()).apply(); }
 
-    public String  getSelectedModel() { return prefs().getString(PREF_MODEL, "gemini-2.0-flash"); }
+    // Multi-Model Support: အသုံးပြုသူ ရွေးချယ်ထားသော မော်ဒယ်ကို ယူသုံးမည်
+    public String  getSelectedModel()   { return prefs().getString(PREF_MODEL, "gemini-2.0-flash"); }
     public void    saveSelectedModel(String model) { prefs().edit().putString(PREF_MODEL, model.trim()).apply(); }
 
     private String getApiUrl() {
-        // 💡 ပြင်ဆင်ချက်- Markdown brackets [ ] များကို ဖယ်ရှားပြီး သန့်ရှင်းသော Raw Endpoint String အဖြစ် ပြောင်းလဲလိုက်သည်
-        return "https://generativelanguage.googleapis.com/v1beta/models/" + getSelectedModel() + ":generateContent?key=";
+        return "[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/)" + getSelectedModel() + ":generateContent?key=";
     }
 
     // ── Core chat call ───────────────────────────────────────────────────────
@@ -84,13 +85,14 @@ public class GeminiClient {
                      String fileContext,
                      Consumer<String> onSuccess,
                      Consumer<String> onError) {
-        chatWithCustomPrompt(SYSTEM_PROMPT, userMessage, history, fileContext, onSuccess, onError);
+        chatWithCustomPrompt(SYSTEM_PROMPT, userMessage, history, fileContext, false, onSuccess, onError);
     }
 
     private void chatWithCustomPrompt(String systemPrompt,
                                       String userMessage,
                                       List<ChatMessage> history,
                                       String fileContext,
+                                      boolean isAutoFix,
                                       Consumer<String> onSuccess,
                                       Consumer<String> onError) {
 
@@ -100,14 +102,18 @@ public class GeminiClient {
         try {
             JSONArray contents = new JSONArray();
 
-            String sysText = systemPrompt;
-            if (fileContext != null && !fileContext.isBlank()) {
-                sysText = sysText + "\n\nCURRENT FILE:\n```\n" + trunc(fileContext, 4000) + "\n```";
+            // Setup Payload Context
+            if (!isAutoFix) {
+                String sysText = systemPrompt;
+                if (fileContext != null && !fileContext.isBlank()) {
+                    sysText = sysText + "\n\nCURRENT FILE:\n```\n" + trunc(fileContext, 4000) + "\n```";
+                }
+                addTurn(contents, "user",  sysText);
+                addTurn(contents, "model", "Ready. How can I help with your Android project?");
             }
-            addTurn(contents, "user",  sysText);
-            addTurn(contents, "model", "Ready. How can I help with your Android project?");
 
-            if (history != null) {
+            // Chat History injecting
+            if (history != null && !isAutoFix) {
                 int start = Math.max(0, history.size() - 8);
                 for (int i = start; i < history.size(); i++) {
                     ChatMessage m = history.get(i);
@@ -118,11 +124,15 @@ public class GeminiClient {
 
             addTurn(contents, "user", userMessage);
 
+            // Construct Gemini v1beta Payload with systemInstruction support
             JSONObject body = new JSONObject()
                     .put("contents", contents)
+                    .put("systemInstruction", new JSONObject()
+                            .put("parts", new JSONArray().put(new JSONObject().put("text", systemPrompt))))
                     .put("generationConfig", new JSONObject()
-                            .put("temperature", 0.3)
-                            .put("maxOutputTokens", 4096));
+                            .put("temperature", isAutoFix ? 0.1 : 0.3) // Auto Fix အတွက် တိကျမှုရအောင် temp ကို 0.1 သို့ လျှော့ချထားပါသည်
+                            .put("responseMimeType", "text/plain")
+                            .put("maxOutputTokens", 8192));
 
             Request req = new Request.Builder()
                     .url(getApiUrl() + apiKey)
@@ -138,7 +148,7 @@ public class GeminiClient {
                     String bodyStr = response.body() != null ? response.body().string() : "";
                     if (!response.isSuccessful()) {
                         onError.accept(switch (response.code()) {
-                            case 400 -> "Invalid request / API key.";
+                            case 400 -> "Invalid request / API key / Model mapping configuration.";
                             case 403 -> "API key not authorized. Enable Generative Language API.";
                             case 429 -> "Rate limit hit — wait a moment and try again.";
                             default  -> "API error " + response.code();
@@ -151,6 +161,11 @@ public class GeminiClient {
                                 .getJSONObject("content")
                                 .getJSONArray("parts").getJSONObject(0)
                                 .getString("text");
+                        
+                        // အကယ်၍ markdown အလွှာများ မတော်တဆ ပါလာခဲ့လျှင် ဖယ်ရှားပစ်ရန်
+                        if (isAutoFix) {
+                            text = cleanMarkdownFences(text);
+                        }
                         onSuccess.accept(text);
                     } catch (Exception e) {
                         onError.accept("Parse error: " + e.getMessage());
@@ -164,10 +179,14 @@ public class GeminiClient {
 
     // ── Shortcuts & Auto-Fix ─────────────────────────────────────────────────
 
+    /**
+     * 🛠 Auto Code Repair Interface
+     * စီမံကိန်းအသစ် Build လုပ်စဉ် Error တက်လာပါက ဤ Method ကို BuildManager မှ လှမ်းခေါ်ပြီး ကုဒ်ကို လှမ်းပြင်ခိုင်းပါမည်။
+     */
     public void fixCodeAuto(String code, String errorLog,
                             Consumer<String> onSuccess, Consumer<String> onError) {
-        String msg = "ERROR LOG:\n" + errorLog + "\n\nSOURCE CODE TO FIX:\n" + code;
-        chatWithCustomPrompt(AUTO_FIX_PROMPT, msg, List.of(), null, onSuccess, onError);
+        String msg = "TARGET ERROR LOG:\n" + errorLog + "\n\nBROKEN FILE SOURCE CODE:\n" + code;
+        chatWithCustomPrompt(AUTO_FIX_PROMPT, msg, List.of(), null, true, onSuccess, onError);
     }
 
     public void fixCode(String code, String errorHint,
@@ -196,6 +215,16 @@ public class GeminiClient {
         arr.put(new JSONObject()
                 .put("role",  role)
                 .put("parts", new JSONArray().put(new JSONObject().put("text", text))));
+    }
+
+    private String cleanMarkdownFences(String input) {
+        if (input == null) return "";
+        String out = input.trim();
+        if (out.startsWith("```")) {
+            out = out.replaceAll("^```[a-zA-Z]*\\n?", "");
+            out = out.replaceAll("\\n?```$", "");
+        }
+        return out.trim();
     }
 
     private String trunc(String s, int max) {
