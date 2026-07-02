@@ -1,5 +1,7 @@
 package pro.devstudio.mobile.adapter;
 
+import android.graphics.Color;
+import android.graphics.Typeface;
 import android.view.LayoutInflater;
 import android.view.ViewGroup;
 
@@ -64,17 +66,61 @@ public class FileTreeAdapter extends RecyclerView.Adapter<FileTreeAdapter.VH> {
     public void onBindViewHolder(@NonNull VH h, int pos) {
         FileNode node = nodes.get(pos);
 
-        // Indent
+        // Indent 計算
         int indentDp = node.depth * 16;
         float density = h.b.getRoot().getContext().getResources().getDisplayMetrics().density;
         h.b.viewIndent.getLayoutParams().width = (int)(indentDp * density);
         h.b.viewIndent.requestLayout();
 
-        h.b.tvIcon.setText(node.icon());
-        h.b.tvFileName.setText(node.name());
+        // ── 🎨 PC STYLE FILE COLOR & ICON SYSTEM ─────────────────────────────
+        File file = node.file;
+        String fileName = node.name();
+        String lowName = fileName.toLowerCase();
+        
+        String iconStr = "📄"; // Default File
+        String colorHex = "#757575"; // Default Gray
+        
+        if (node.isDirectory()) {
+            iconStr = node.isExpanded ? "📂" : "📁";
+            colorHex = "#FFB300"; // Android Studio Folder Gold
+            h.b.tvFileName.setTypeface(null, Typeface.BOLD);
+            h.b.tvFileName.setTextColor(Color.parseColor("#212121"));
+        } else {
+            h.b.tvFileName.setTypeface(null, Typeface.NORMAL);
+            h.b.tvFileName.setTextColor(Color.parseColor("#424242"));
+            
+            // File Type Extensions Checking
+            if (lowName.equals("androidmanifest.xml")) {
+                iconStr = "⚙️"; 
+                colorHex = "#00897B"; // Manifest Teal
+            } else if (lowName.endsWith(".java")) {
+                iconStr = "☕"; 
+                colorHex = "#1E88E5"; // Java Blue
+            } else if (lowName.endsWith(".xml")) {
+                iconStr = "🎨"; 
+                colorHex = "#F4511E"; // Layout/Resource Orange
+            } else if (lowName.endsWith(".gradle") || lowName.startsWith("gradle")) {
+                iconStr = "🐘"; 
+                colorHex = "#0288D1"; // Gradle Elephant Blue
+            } else if (lowName.endsWith(".png") || lowName.endsWith(".jpg") || lowName.endsWith(".webp")) {
+                iconStr = "🖼️";
+                colorHex = "#43A047"; // Image Green
+            } else if (lowName.endsWith(".txt") || lowName.endsWith(".md")) {
+                iconStr = "📝";
+                colorHex = "#616161";
+            }
+        }
+
+        // Apply Icon & Colors directly to ViewBinding fields
+        h.b.tvIcon.setText(iconStr);
+        h.b.tvIcon.setTextColor(Color.parseColor(colorHex));
+        h.b.tvFileName.setText(fileName);
+        
+        // ── BADGE CONFIGURATION ──────────────────────────────────────────────
         h.b.tvBadge.setText(node.languageBadge());
         h.b.tvBadge.setVisibility(node.languageBadge().isEmpty() ? android.view.View.GONE : android.view.View.VISIBLE);
 
+        // Click Listeners
         h.b.getRoot().setOnClickListener(v -> {
             if (node.isDirectory()) {
                 toggleExpand(node, pos);
