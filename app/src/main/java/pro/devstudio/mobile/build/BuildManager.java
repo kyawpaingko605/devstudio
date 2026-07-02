@@ -31,7 +31,7 @@ import pro.devstudio.mobile.ai.GeminiClient;
 
 /**
  * Orchestrates the DevStudio build pipeline (No-Root Local Build System)
- * Fixed: Executable permission issues on Android 10+ using /system/bin/sh
+ * Fixed: Executable permission issues on Android 10+ using Native jniLibs (libaapt2.so)
  */
 public class BuildManager {
 
@@ -58,22 +58,25 @@ public class BuildManager {
     }
 
     private void prepareLocalTools(BuildCallback cb) throws IOException {
-        File toolsDir = new File(context.getFilesDir(), "build-tools");
-        if (!toolsDir.exists()) toolsDir.mkdirs();
+        File jarToolsDir = new File(context.getFilesDir(), "build-tools");
+        if (!jarToolsDir.exists()) jarToolsDir.mkdirs();
 
         String[] files = context.getAssets().list("build-tools");
         if (files == null) return;
 
         for (String filename : files) {
-            File targetFile = new File(toolsDir, filename);
-            if (targetFile.exists()) continue; 
+            // .jar နှင့် .keystore ဖိုင်များကိုသာ internal storage သို့ ကူးထည့်မည် (aapt2 ကို jniLibs မှ သုံးမည်)
+            if (filename.endsWith(".jar") || filename.endsWith(".keystore") || filename.endsWith(".jar")) {
+                File targetFile = new File(jarToolsDir, filename);
+                if (targetFile.exists()) continue; 
 
-            try (InputStream in = context.getAssets().open("build-tools/" + filename);
-                 OutputStream out = new FileOutputStream(targetFile)) {
-                byte[] buffer = new byte[4096];
-                int read;
-                while ((read = in.read(buffer)) != -1) {
-                    out.write(buffer, 0, read);
+                try (InputStream in = context.getAssets().open("build-tools/" + filename);
+                     OutputStream out = new FileOutputStream(targetFile)) {
+                    byte[] buffer = new byte[4096];
+                    int read;
+                    while ((read = in.read(buffer)) != -1) {
+                        out.write(buffer, 0, read);
+                    }
                 }
             }
         }
@@ -90,15 +93,19 @@ public class BuildManager {
                 cb.onProgress("Preparing build tools…", 10);
                 cb.onLog("► Preparing local build tools from assets…", LogLevel.INFO);
                 prepareLocalTools(cb);
-                File toolsDir = new File(context.getFilesDir(), "build-tools");
-                cb.onLog("  ✓ Tools are ready in internal storage.", LogLevel.SUCCESS);
+                
+                // Android System မှ တရားဝင် ခွင့်ပြုထားသော Native Library လမ်းကြောင်းကို ယူခြင်း
+                String nativeLibDir = context.getApplicationInfo().nativeLibraryDir;
+                File aapt2Binary   = new File(nativeLibDir, "libaapt2.so"); 
 
-                File aapt2Binary   = new File(toolsDir, "aapt2");
+                File toolsDir      = new File(context.getFilesDir(), "build-tools");
                 File ecjJar        = new File(toolsDir, "ecj.jar");
                 File d8Jar         = new File(toolsDir, "d8.jar");
                 File androidJar    = new File(toolsDir, "android.jar");
                 File apksignerJar  = new File(toolsDir, "apksigner.jar");
                 File debugKeystore = new File(toolsDir, "debug.keystore");
+                
+                cb.onLog("  ✓ Tools are ready in secure storage.", LogLevel.SUCCESS);
 
                 // ── Step 2: Validate XMLs ────────────────────────────────────
                 cb.onProgress("Validating XML files…", 20);
@@ -129,21 +136,17 @@ public class BuildManager {
                 new File(intermediatesRes).mkdirs();
                 new File(binDir).mkdirs();
 
-                // ── Step 3: AAPT2 Compile & Link (Using Shell to fix Permission Denied) ──
+                // ── Step 3: AAPT2 Compile & Link (Using Secure libaapt2.so) ──
                 cb.onProgress("Compiling resources…", 40);
                 cb.onLog("► [1/5] Compiling resources via AAPT2…", LogLevel.INFO);
                 
-                String compileScript = "chmod 755 " + aapt2Binary.getAbsolutePath() + " && " +
-                        aapt2Binary.getAbsolutePath() + " compile --dir " + resPath + " -o " + intermediatesRes + "/resources.zip";
-                List<String> compileCmd = List.of("/system/bin/sh", "-c", compileScript);
+                List<String> compileCmd = List.of(aapt2Binary.getAbsolutePath(), "compile", "--dir", resPath, "-o", intermediatesRes + "/resources.zip");
                 if (runProcess(compileCmd, projectDir, cb) != 0) { cb.onError("AAPT2 Compile Failed"); return; }
 
                 cb.onLog("► [2/5] Linking resources and generating R.java…", LogLevel.INFO);
                 String unalignedApk = binDir + "/app-unaligned.apk";
                 
-                String linkScript = aapt2Binary.getAbsolutePath() + " link -I " + androidJar.getAbsolutePath() + 
-                        " --manifest " + manifestPath + " -o " + unalignedApk + " --java " + genPath + " " + intermediatesRes + "/resources.zip";
-                List<String> linkCmd = List.of("/system/bin/sh", "-c", linkScript);
+                List<String> linkCmd = List.of(aapt2Binary.getAbsolutePath(), "link", "-I", androidJar.getAbsolutePath(), "--manifest", manifestPath, "-o", unalignedApk, "--java", genPath, intermediatesRes + "/resources.zip");
                 if (runProcess(linkCmd, projectDir, cb) != 0) { cb.onError("AAPT2 Link Failed"); return; }
 
                 // ── Step 4: Java Compilation (ECJ) ───────────────────────────
