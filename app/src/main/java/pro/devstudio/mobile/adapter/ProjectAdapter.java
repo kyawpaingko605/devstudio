@@ -1,6 +1,7 @@
 package pro.devstudio.mobile.adapter;
 
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -38,18 +39,35 @@ public class ProjectAdapter extends RecyclerView.Adapter<ProjectAdapter.VH> {
     public void onBindViewHolder(@NonNull VH h, int pos) {
         Project p = list.get(pos);
 
+        // ── 📁 PC DASHBOARD COLOR & TEXT STYLE ──────────────────────────────
         h.b.tvProjectName.setText(p.name);
+        h.b.tvProjectName.setTypeface(null, Typeface.BOLD); // နာမည်ကို စာလုံးအထူပြောင်းသည်
+        
         h.b.tvPackageName.setText(p.packageName);
         h.b.tvLastModified.setText(p.relativeTime());
+        
+        // Template Badge အား အရောင်နှင့် Icon ပေါင်းစပ်ပြီး ပိုမိုလှပအောင် ဖန်တီးခြင်း
         h.b.tvTemplate.setText(templateBadge(p.template));
+        h.b.tvTemplate.setTextColor(Color.parseColor(templateColor(p.template)));
 
-        // Accent border color
+        // 🎨 Accent Border & Folder Text Icon Binding
+        String targetAccent = "#CBA6F7"; // Default Latte Purple
+        if (p.accentColor != null && !p.accentColor.isBlank()) {
+            targetAccent = p.accentColor;
+        }
+
         try {
-            h.b.accentBorder.setBackgroundColor(Color.parseColor(p.accentColor));
+            int parsedColor = Color.parseColor(targetAccent);
+            h.b.accentBorder.setBackgroundColor(parsedColor);
+            
+            // 💡 အကယ်၍ သင့် layout (ItemProjectBinding) ထဲမှာ tvProjectIcon သို့မဟုတ် tvFolderIcon ပါခဲ့ရင် 
+            // ပရောဂျက်ရဲ့ ပထမဆုံးစာလုံးကို Accent color နဲ့ လှလှပပ ပြသနိုင်ဖို့ ကုဒ်ထည့်ပေးထားပါတယ် (မပါရင် macro က ကျော်သွားပါမယ်)
+            // Example: h.b.tvProjectIcon.setTextColor(parsedColor);
         } catch (Exception e) {
             h.b.accentBorder.setBackgroundColor(Color.parseColor("#CBA6F7"));
         }
 
+        // Click Systems
         h.b.getRoot().setOnClickListener(v -> listener.onOpen(p));
         h.b.getRoot().setOnLongClickListener(v -> {
             listener.onDelete(p, h.getAdapterPosition());
@@ -59,12 +77,29 @@ public class ProjectAdapter extends RecyclerView.Adapter<ProjectAdapter.VH> {
 
     @Override public int getItemCount() { return list.size(); }
 
+    /**
+     * Template အလိုက် ပေါ်မည့်စာသားနှင့် အိုင်ကွန်အတွဲအစပ်
+     */
     private String templateBadge(String t) {
-        return switch (t) {
-            case "login" -> "Login";
-            case "basic" -> "Basic";
-            case "list"  -> "List";
-            default      -> "Empty";
+        if (t == null) return "📦 Empty";
+        return switch (t.toLowerCase().trim()) {
+            case "login" -> "🔑 Login Activity";
+            case "basic" -> "📱 Basic Activity";
+            case "list"  -> "📜 List View Activity";
+            default      -> "📦 Empty Project";
+        };
+    }
+
+    /**
+     * Template Badge များအတွက် PC IDE စတိုင် သီးသန့်အရောင်များ
+     */
+    private String templateColor(String t) {
+        if (t == null) return "#757575";
+        return switch (t.toLowerCase().trim()) {
+            case "login" -> "#E67E22"; // Orange
+            case "basic" -> "#2ECC71"; // Emerald Green
+            case "list"  -> "#3498DB"; // Dodger Blue
+            default      -> "#7F8C8D"; // Asbestos Gray
         };
     }
 
