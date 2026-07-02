@@ -31,7 +31,7 @@ import pro.devstudio.mobile.ai.GeminiClient;
 
 /**
  * Orchestrates the DevStudio build pipeline (No-Root Local Build System)
- * Fixed: Added LD_LIBRARY_PATH to runProcess to resolve dynamic linking issue (libandroid-base.so not found)
+ * Fixed: Comprehensive LD_LIBRARY_PATH paths added to resolve dynamic linking issue (libandroid-base.so not found)
  */
 public class BuildManager {
 
@@ -324,11 +324,15 @@ public class BuildManager {
         pb.redirectErrorStream(true);
         
         // Dynamic library ချိတ်ဆက်မှုအမှား (libandroid-base.so not found) ကို ကျော်ဖြတ်ရန်
-        // Environment ထဲတွင် လိုအပ်သော Library လမ်းကြောင်းများကို လှမ်းညွှန်းပေးခြင်း
+        // Environment ထဲတွင် လိုအပ်သော System Library လမ်းကြောင်းအားလုံးကို စုံလင်စွာ လှမ်းညွှန်းပေးခြင်း
         Map<String, String> env = pb.environment();
         String nativeLibDir = context.getApplicationInfo().nativeLibraryDir;
         
-        String systemLibPath = "/system/lib64:/system/lib:/apex/com.android.runtime/lib64:/apex/com.android.runtime/lib";
+        String systemLibPath = "/system/lib64:/system/lib"
+                + ":/apex/com.android.runtime/lib64:/apex/com.android.runtime/lib"
+                + ":/apex/com.android.art/lib64:/apex/com.android.art/lib"
+                + ":/system/apex/com.android.runtime/lib64:/system/apex/com.android.runtime/lib";
+                
         env.put("LD_LIBRARY_PATH", nativeLibDir + ":" + systemLibPath);
 
         Process process = pb.start();
