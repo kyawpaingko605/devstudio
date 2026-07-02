@@ -1,16 +1,27 @@
 package pro.devstudio.mobile.build;
 
 import android.content.Context;
-import android.content.Intent;
-import android.content.pm.PackageManager;
-
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserFactory;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.StringReader;
+import java.net.URI;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -19,18 +30,20 @@ import pro.devstudio.mobile.util.FileUtils;
 import pro.devstudio.mobile.ai.GeminiClient;
 
 /**
- * Orchestrates the DevStudio build pipeline:
- * 1. Validate XML layouts
- * 2. Package project files as ZIP (always works, no root required)
- * 3. Launch Termux for Production Release Build (AAB/APK) for Play Store
- * 4. Automatically trigger AI Auto-Fix on Build Failure
+ * Orchestrates the DevStudio build pipeline (No-Root Local Build System)
+ * 1. Extract build-tools from assets to internal storage
+ * 2. Validate XML layouts
+ * 3. Run AAPT2 Compile & Link
+ * 4. Run ECJ (Java Compiler)
+ * 5. Run D8 (Dex Compiler) & inject classes.dex into APK
+ * 6. Sign APK with apksigner
  */
 public class BuildManager {
 
     public interface BuildCallback {
         void onProgress(String message, int percent);
         void onLog(String line, LogLevel level);
-        void onSuccess(File zipFile, File apkFile /* nullable */);
+        void onSuccess(File zipFile, File apkFile);
         void onError(String message);
     }
 
@@ -49,9 +62,30 @@ public class BuildManager {
         buildInternal(project, projectDir, cb, false);
     }
 
-    /**
-     * Internal build process to support re-triggering after AI fixes.
-     */
+    private void prepareLocalTools(BuildCallback cb) throws IOException {
+        File toolsDir = new File(context.getFilesDir(), "build-tools");
+        if (!toolsDir.exists()) toolsDir.mkdirs();
+
+        String[] files = context.getAssets().list("build-tools");
+        if (files == null) return;
+
+        for (String filename : files) {
+            File targetFile = new File(toolsDir, filename);
+            if (targetFile.exists()) continue; // Skip if already extracted
+
+            try (InputStream in = context.getAssets().open("build-tools/" + filename);
+                 OutputStream out = new FileOutputStream(targetFile)) {
+                byte[] buffer = new byte[4096];
+                int read;
+                while ((read = in.read(buffer)) != -1) {
+                    out.write(buffer, 0, read);
+                }
+                targetFile.setExecutable(true, false);
+                targetFile.setReadable(true, false);
+            }
+        }
+    }
+
     private void buildInternal(Project project, File projectDir, BuildCallback cb, boolean isRetry) {
         executor.execute(() -> {
             try {
@@ -59,70 +93,146 @@ public class BuildManager {
                     cb.onLog("► AI Auto-Fix applied. Re-attempting compilation…", LogLevel.INFO);
                 }
 
-                // ── Step 1: Validate XMLs ────────────────────────────────────
-                cb.onProgress("Validating XML files…", 10);
+                // ── Step 1: Prepare Tools ────────────────────────────────────
+                cb.onProgress("Preparing build tools…", 10);
+                cb.onLog("► Preparing local build tools from assets…", LogLevel.INFO);
+                prepareLocalTools(cb);
+                File toolsDir = new File(context.getFilesDir(), "build-tools");
+                cb.onLog("  ✓ Tools are ready in internal storage.", LogLevel.SUCCESS);
+
+                File aapt2Binary   = new File(toolsDir, "aapt2");
+                File ecjJar        = new File(toolsDir, "ecj.jar");
+                File d8Jar         = new File(toolsDir, "d8.jar");
+                File androidJar    = new File(toolsDir, "android.jar");
+                File apksignerJar  = new File(toolsDir, "apksigner.jar");
+                File debugKeystore = new File(toolsDir, "debug.keystore");
+
+                // ── Step 2: Validate XMLs ────────────────────────────────────
+                cb.onProgress("Validating XML files…", 20);
                 cb.onLog("► Checking XML layouts…", LogLevel.INFO);
                 List<String> xmlErrors = validateXmlFiles(projectDir);
                 if (!xmlErrors.isEmpty()) {
                     for (String err : xmlErrors) cb.onLog("  ✗ " + err, LogLevel.ERROR);
-                    cb.onLog("  Fix XML errors before building.", LogLevel.WARNING);
-                } else {
-                    cb.onLog("  ✓ All XML files valid.", LogLevel.SUCCESS);
+                    cb.onError("XML Validation Failed");
+                    return;
+                }
+                cb.onLog("  ✓ All XML files valid.", LogLevel.SUCCESS);
+
+                // Paths Setup
+                String manifestPath = new File(projectDir, "app/src/main/AndroidManifest.xml").getAbsolutePath();
+                String resPath      = new File(projectDir, "app/src/main/res").getAbsolutePath();
+                String srcPath      = new File(projectDir, "app/src/main/java").getAbsolutePath();
+                
+                String buildDir         = new File(projectDir, "app/build").getAbsolutePath();
+                String genPath          = buildDir + "/generated";
+                String objPath          = buildDir + "/obj";
+                String intermediatesRes = buildDir + "/intermediates/res";
+                String binDir           = buildDir + "/outputs/apk/release";
+
+                // Clean and Create Directories
+                deleteDir(new File(buildDir));
+                new File(genPath).mkdirs();
+                new File(objPath).mkdirs();
+                new File(intermediatesRes).mkdirs();
+                new File(binDir).mkdirs();
+
+                // ── Step 3: AAPT2 Compile & Link ─────────────────────────────
+                cb.onProgress("Compiling resources…", 40);
+                cb.onLog("► [1/5] Compiling resources via AAPT2…", LogLevel.INFO);
+                List<String> compileCmd = List.of(aapt2Binary.getAbsolutePath(), "compile", "--dir", resPath, "-o", intermediatesRes + "/resources.zip");
+                if (runProcess(compileCmd, projectDir, cb) != 0) { cb.onError("AAPT2 Compile Failed"); return; }
+
+                cb.onLog("► [2/5] Linking resources and generating R.java…", LogLevel.INFO);
+                String unalignedApk = binDir + "/app-unaligned.apk";
+                List<String> linkCmd = List.of(aapt2Binary.getAbsolutePath(), "link", "-I", androidJar.getAbsolutePath(), "--manifest", manifestPath, "-o", unalignedApk, "--java", genPath, intermediatesRes + "/resources.zip");
+                if (runProcess(linkCmd, projectDir, cb) != 0) { cb.onError("AAPT2 Link Failed"); return; }
+
+                // ── Step 4: Java Compilation (ECJ) ───────────────────────────
+                cb.onProgress("Compiling Java code…", 60);
+                cb.onLog("► [3/5] Compiling Java source codes with ECJ…", LogLevel.INFO);
+                List<String> ecjCmd = new ArrayList<>();
+                ecjCmd.add("java"); ecjCmd.add("-jar"); ecjCmd.add(ecjJar.getAbsolutePath());
+                ecjCmd.add("-d"); ecjCmd.add(objPath);
+                ecjCmd.add("-cp"); ecjCmd.add(androidJar.getAbsolutePath());
+                ecjCmd.add("-source"); ecjCmd.add("1.8"); ecjCmd.add("-target"); ecjCmd.add("1.8");
+                addAllFiles(new File(srcPath), ".java", ecjCmd);
+                addAllFiles(new File(genPath), ".java", ecjCmd);
+                
+                if (runProcess(ecjCmd, projectDir, cb) != 0) {
+                    cb.onLog("  ✗ Java Compilation Failed. Launching AI Fix…", LogLevel.ERROR);
+                    if (!isRetry && geminiClient.hasApiKey()) {
+                        triggerAiAutoFix(project, projectDir, cb);
+                    } else {
+                        cb.onError("Java Compilation Failed");
+                    }
+                    return;
                 }
 
-                // ── Step 2: Package ZIP ──────────────────────────────────────
-                cb.onProgress("Packaging project…", 40);
-                cb.onLog("► Creating ZIP archive…", LogLevel.INFO);
+                // ── Step 5: DEX Conversion (D8) ──────────────────────────────
+                cb.onProgress("Converting to DEX…", 80);
+                cb.onLog("► [4/5] Converting class files to DEX (d8)…", LogLevel.INFO);
+                String intermediatesDex = buildDir + "/intermediates/dex";
+                new File(intermediatesDex).mkdirs();
+                
+                List<String> d8Cmd = new ArrayList<>();
+                d8Cmd.add("java"); d8Cmd.add("-jar"); d8Cmd.add(d8Jar.getAbsolutePath());
+                d8Cmd.add("--lib"); d8Cmd.add(androidJar.getAbsolutePath());
+                d8Cmd.add("--output"); d8Cmd.add(intermediatesDex);
+                addAllFiles(new File(objPath), ".class", d8Cmd);
+                if (runProcess(d8Cmd, projectDir, cb) != 0) { cb.onError("DEX Conversion Failed"); return; }
+
+                // Inject classes.dex into APK
+                File dexFile = new File(intermediatesDex, "classes.dex");
+                File unalignedApkFile = new File(unalignedApk);
+                try {
+                    Map<String, String> env = new HashMap<>();
+                    env.put("create", "false");
+                    URI uri = URI.create("jar:" + unalignedApkFile.toURI());
+                    try (FileSystem fs = FileSystems.newFileSystem(uri, env)) {
+                        Path nf = fs.getPath("classes.dex");
+                        Files.copy(dexFile.toPath(), nf, StandardCopyOption.REPLACE_EXISTING);
+                    }
+                    cb.onLog("  ✓ classes.dex injected into APK successfully.", LogLevel.SUCCESS);
+                } catch (Exception e) {
+                    cb.onLog("  ✗ Failed to inject classes.dex: " + e.getMessage(), LogLevel.ERROR);
+                    cb.onError("DEX Injection Failed");
+                    return;
+                }
+
+                // ── Step 6: Sign APK ─────────────────────────────────────────
+                cb.onProgress("Signing APK…", 95);
+                cb.onLog("► [5/5] Signing APK with debug.keystore…", LogLevel.INFO);
+                File releaseApk = new File(binDir, "app-release.apk");
+
+                if (apksignerJar.exists() && debugKeystore.exists()) {
+                    List<String> signCmd = List.of(
+                        "java", "-jar", apksignerJar.getAbsolutePath(), "sign",
+                        "--ks", debugKeystore.getAbsolutePath(),
+                        "--ks-pass", "pass:android",
+                        "--key-pass", "pass:android",
+                        "--out", releaseApk.getAbsolutePath(),
+                        unalignedApk
+                    );
+                    if (runProcess(signCmd, projectDir, cb) == 0) {
+                        cb.onLog("  ✓ APK Signed successfully!", LogLevel.SUCCESS);
+                    } else {
+                        cb.onLog("  ⚠ APK Sign failed, using unsigned APK.", LogLevel.WARNING);
+                        unalignedApkFile.renameTo(releaseApk);
+                    }
+                } else {
+                    unalignedApkFile.renameTo(releaseApk);
+                }
+
+                // Create ZIP backup anyway as a secondary output
                 File cacheDir = new File(context.getCacheDir(), "builds");
                 cacheDir.mkdirs();
                 File zipOut = new File(cacheDir, project.dirName() + ".zip");
                 FileUtils.zipDirectory(projectDir, zipOut);
-                cb.onLog("  ✓ ZIP: " + zipOut.getName() + " (" + (zipOut.length() / 1024) + " KB)", LogLevel.SUCCESS);
-
-                // ── Step 3: Try Termux (Play Store Production Build) ─────────
-                cb.onProgress("Attempting Play Store Build…", 70);
-                File apkFile = null;
-                if (isTermuxAvailable()) {
-                    cb.onLog("► Termux detected — launching Production Release build…", LogLevel.INFO);
-                    launchTermuxBuild(projectDir);
-                    cb.onLog("  ℹ Running bundleRelease & assembleRelease in Termux.", LogLevel.INFO);
-
-                    File targetAab = new File(projectDir, "app/build/outputs/bundle/release/app-release.aab");
-                    File targetApk = new File(projectDir, "app/build/outputs/apk/release/app-release.apk");
-                    
-                    int attempts = 0;
-                    while (!targetAab.exists() && !targetApk.exists() && attempts < 120) {
-                        Thread.sleep(1000);
-                        attempts++;
-                    }
-
-                    if (targetAab.exists()) {
-                        apkFile = targetAab;
-                        cb.onLog("  ✓ AAB Generated (Ready for Play Store): " + apkFile.getName(), LogLevel.SUCCESS);
-                        cb.onLog("✓ Build complete — Play Store AAB ready.", LogLevel.SUCCESS);
-                    } else if (targetApk.exists()) {
-                        apkFile = targetApk;
-                        cb.onLog("  ✓ Release APK Generated: " + apkFile.getName(), LogLevel.SUCCESS);
-                        cb.onLog("✓ Build complete — Release APK ready.", LogLevel.SUCCESS);
-                    } else {
-                        cb.onLog("  ⚠ Build timed out or failed. Analyzing logs for AI Auto-Fix…", LogLevel.WARNING);
-                        
-                        if (!isRetry && geminiClient.hasApiKey()) {
-                            triggerAiAutoFix(project, projectDir, cb);
-                            return;
-                        } else {
-                            cb.onLog("✓ Build complete — ZIP ready.", LogLevel.SUCCESS);
-                        }
-                    }
-                } else {
-                    cb.onLog("► Termux not found. Install Termux for Play Store compilation.", LogLevel.WARNING);
-                    cb.onLog("  ℹ ZIP export contains all source files ready to build.", LogLevel.INFO);
-                    cb.onLog("✓ Build complete — ZIP ready.", LogLevel.SUCCESS);
-                }
 
                 cb.onProgress("Done.", 100);
                 cb.onLog("━━━━━━━━━━━━━━━━━━━━━━━━", LogLevel.INFO);
-                cb.onSuccess(zipOut, apkFile);
+                cb.onLog("✓ Build complete — Standalone App Ready!", LogLevel.SUCCESS);
+                cb.onSuccess(zipOut, releaseApk);
 
             } catch (Exception e) {
                 cb.onLog("✗ Build error: " + e.getMessage(), LogLevel.ERROR);
@@ -131,12 +241,8 @@ public class BuildManager {
         });
     }
 
-    /**
-     * Build ကျရှုံးပါက နောက်ကွယ်မှ Error နှင့် ကုဒ်ကိုဖတ်ပြီး AI ဖြင့် ကုဒ်ပြန်ပြင်ခိုင်းမည့် စနစ်
-     */
     private void triggerAiAutoFix(Project project, File projectDir, BuildCallback cb) {
         cb.onLog("► Initializing AI Auto-Fix (" + geminiClient.getSelectedModel() + ")…", LogLevel.INFO);
-        
         File srcDir = new File(projectDir, "app/src/main/java");
         File targetCodeFile = findPrimarySourceFile(srcDir);
         
@@ -147,29 +253,49 @@ public class BuildManager {
 
         try {
             String currentCode = FileUtils.readFile(targetCodeFile);
-            String simulatedErrorLog = "Compilation failed inside: " + targetCodeFile.getName() + ". Check for missing symbols, incorrect syntax, or layout ID mismatch.";
-
-            cb.onLog("  ℹ Sending code from " + targetCodeFile.getName() + " to Gemini…", LogLevel.INFO);
+            String simulatedErrorLog = "Compilation failed inside: " + targetCodeFile.getName() + ". Check for syntax errors.";
+            cb.onLog("  ℹ Sending code to Gemini…", LogLevel.INFO);
 
             geminiClient.fixCodeAuto(currentCode, simulatedErrorLog, fixedCode -> {
                 try {
                     if (fixedCode != null && !fixedCode.trim().isEmpty()) {
                         FileUtils.writeFile(targetCodeFile, fixedCode.trim());
                         cb.onLog("  ✓ AI successfully patched " + targetCodeFile.getName(), LogLevel.SUCCESS);
-                        
                         buildInternal(project, projectDir, cb, true);
                     } else {
-                        cb.onLog("  ✗ AI returned an empty code snippet.", LogLevel.ERROR);
+                        cb.onLog("  ✗ AI returned empty code.", LogLevel.ERROR);
                     }
                 } catch (Exception e) {
                     cb.onLog("  ✗ Failed to save AI fixed code: " + e.getMessage(), LogLevel.ERROR);
                 }
-            }, error -> {
-                cb.onLog("  ✗ AI Auto-Fix failed: " + error, LogLevel.ERROR);
-            });
+            }, error -> cb.onLog("  ✗ AI Auto-Fix failed: " + error, LogLevel.ERROR));
 
         } catch (Exception e) {
             cb.onLog("  ✗ Error reading code file for AI: " + e.getMessage(), LogLevel.ERROR);
+        }
+    }
+
+    private int runProcess(List<String> command, File workingDir, BuildCallback cb) throws Exception {
+        ProcessBuilder pb = new ProcessBuilder(command);
+        pb.directory(workingDir);
+        pb.redirectErrorStream(true);
+        Process process = pb.start();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                cb.onLog(line, LogLevel.INFO);
+            }
+        }
+        return process.waitFor();
+    }
+
+    private void addAllFiles(File dir, String extension, List<String> list) {
+        if (!dir.exists()) return;
+        File[] files = dir.listFiles();
+        if (files == null) return;
+        for (File f : files) {
+            if (f.isDirectory()) addAllFiles(f, extension, list);
+            else if (f.getName().endsWith(extension)) list.add(f.getAbsolutePath());
         }
     }
 
@@ -187,8 +313,6 @@ public class BuildManager {
         return null;
     }
 
-    // ── XML validation ───────────────────────────────────────────────────────
-
     private List<String> validateXmlFiles(File dir) {
         List<String> errors = new ArrayList<>();
         collectXmlFiles(dir, errors);
@@ -199,9 +323,8 @@ public class BuildManager {
         File[] files = dir.listFiles();
         if (files == null) return;
         for (File f : files) {
-            if (f.isDirectory()) {
-                collectXmlFiles(f, errors);
-            } else if (f.getName().endsWith(".xml")) {
+            if (f.isDirectory()) collectXmlFiles(f, errors);
+            else if (f.getName().endsWith(".xml")) {
                 String err = validateXml(f);
                 if (err != null) errors.add(f.getName() + ": " + err);
             }
@@ -215,38 +338,20 @@ public class BuildManager {
             XmlPullParserFactory factory = XmlPullParserFactory.newInstance();
             XmlPullParser parser = factory.newPullParser();
             parser.setInput(new StringReader(content));
-            int event;
-            while ((event = parser.next()) != XmlPullParser.END_DOCUMENT) { }
+            while (parser.next() != XmlPullParser.END_DOCUMENT) {}
             return null;
         } catch (Exception e) {
             return e.getMessage();
         }
     }
 
-    // ── Termux integration ───────────────────────────────────────────────────
-
-    public boolean isTermuxAvailable() {
-        try {
-            context.getPackageManager().getPackageInfo("com.termux", 0);
-            return true;
-        } catch (PackageManager.NameNotFoundException e) {
-            return false;
+    private void deleteDir(File f) {
+        if (f.isDirectory()) {
+            File[] files = f.listFiles();
+            if (files != null) {
+                for (File c : files) deleteDir(c);
+            }
         }
-    }
-
-    private void launchTermuxBuild(File projectDir) {
-        try {
-            String bashCommand = "cd '" + projectDir.getAbsolutePath() + "' && " +
-                    "chmod +x gradlew && " +
-                    "./gradlew bundleRelease assembleRelease -Pandroid.aapt2FromMavenOverride=" + projectDir.getAbsolutePath() + "/gradle/aapt2 --no-daemon 2>&1 | tail -30";
-
-            Intent intent = new Intent("com.termux.RUN_COMMAND");
-            intent.setClassName("com.termux", "com.termux.app.RunCommandService");
-            intent.putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash");
-            intent.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", new String[]{"-c", bashCommand});
-            intent.putExtra("com.termux.RUN_COMMAND_WORKDIR", projectDir.getAbsolutePath());
-            intent.putExtra("com.termux.RUN_COMMAND_BACKGROUND", false);
-            context.startService(intent);
-        } catch (Exception ignored) {}
+        f.delete();
     }
 }
