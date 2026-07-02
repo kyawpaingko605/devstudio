@@ -31,12 +31,7 @@ import pro.devstudio.mobile.ai.GeminiClient;
 
 /**
  * Orchestrates the DevStudio build pipeline (No-Root Local Build System)
- * 1. Extract build-tools from assets to internal storage
- * 2. Validate XML layouts
- * 3. Run AAPT2 Compile & Link
- * 4. Run ECJ (Java Compiler)
- * 5. Run D8 (Dex Compiler) & inject classes.dex into APK
- * 6. Sign APK with apksigner
+ * Fixed: Executable permission issues on Android 10+ using /system/bin/sh
  */
 public class BuildManager {
 
@@ -71,7 +66,7 @@ public class BuildManager {
 
         for (String filename : files) {
             File targetFile = new File(toolsDir, filename);
-            if (targetFile.exists()) continue; // Skip if already extracted
+            if (targetFile.exists()) continue; 
 
             try (InputStream in = context.getAssets().open("build-tools/" + filename);
                  OutputStream out = new FileOutputStream(targetFile)) {
@@ -80,8 +75,6 @@ public class BuildManager {
                 while ((read = in.read(buffer)) != -1) {
                     out.write(buffer, 0, read);
                 }
-                targetFile.setExecutable(true, false);
-                targetFile.setReadable(true, false);
             }
         }
     }
@@ -136,15 +129,21 @@ public class BuildManager {
                 new File(intermediatesRes).mkdirs();
                 new File(binDir).mkdirs();
 
-                // ── Step 3: AAPT2 Compile & Link ─────────────────────────────
+                // ── Step 3: AAPT2 Compile & Link (Using Shell to fix Permission Denied) ──
                 cb.onProgress("Compiling resources…", 40);
                 cb.onLog("► [1/5] Compiling resources via AAPT2…", LogLevel.INFO);
-                List<String> compileCmd = List.of(aapt2Binary.getAbsolutePath(), "compile", "--dir", resPath, "-o", intermediatesRes + "/resources.zip");
+                
+                String compileScript = "chmod 755 " + aapt2Binary.getAbsolutePath() + " && " +
+                        aapt2Binary.getAbsolutePath() + " compile --dir " + resPath + " -o " + intermediatesRes + "/resources.zip";
+                List<String> compileCmd = List.of("/system/bin/sh", "-c", compileScript);
                 if (runProcess(compileCmd, projectDir, cb) != 0) { cb.onError("AAPT2 Compile Failed"); return; }
 
                 cb.onLog("► [2/5] Linking resources and generating R.java…", LogLevel.INFO);
                 String unalignedApk = binDir + "/app-unaligned.apk";
-                List<String> linkCmd = List.of(aapt2Binary.getAbsolutePath(), "link", "-I", androidJar.getAbsolutePath(), "--manifest", manifestPath, "-o", unalignedApk, "--java", genPath, intermediatesRes + "/resources.zip");
+                
+                String linkScript = aapt2Binary.getAbsolutePath() + " link -I " + androidJar.getAbsolutePath() + 
+                        " --manifest " + manifestPath + " -o " + unalignedApk + " --java " + genPath + " " + intermediatesRes + "/resources.zip";
+                List<String> linkCmd = List.of("/system/bin/sh", "-c", linkScript);
                 if (runProcess(linkCmd, projectDir, cb) != 0) { cb.onError("AAPT2 Link Failed"); return; }
 
                 // ── Step 4: Java Compilation (ECJ) ───────────────────────────
@@ -223,7 +222,7 @@ public class BuildManager {
                     unalignedApkFile.renameTo(releaseApk);
                 }
 
-                // Create ZIP backup anyway as a secondary output
+                // Backup ZIP
                 File cacheDir = new File(context.getCacheDir(), "builds");
                 cacheDir.mkdirs();
                 File zipOut = new File(cacheDir, project.dirName() + ".zip");
