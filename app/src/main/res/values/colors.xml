@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Catppuccin Mocha — IDE dark palette -->
+    <color name="ctp_base">#1E1E2E</color>
+    <color name="ctp_mantle">#181825</color>
+    <color name="ctp_crust">#11111B</color>
+    <color name="ctp_surface0">#313244</color>
+    <color name="ctp_surface1">#45475A</color>
+    <color name="ctp_surface2">#585B70</color>
+    <color name="ctp_overlay0">#6C7086</color>
+    <color name="ctp_overlay1">#7F849C</color>
+    <color name="ctp_text">#CDD6F4</color>
+    <color name="ctp_subtext0">#A6ADC8</color>
+    <color name="ctp_subtext1">#BAC2DE</color>
+
+    <!-- Accent colors -->
+    <color name="ctp_mauve">#CBA6F7</color>
+    <color name="ctp_blue">#89B4FA</color>
+    <color name="ctp_sapphire">#74C7EC</color>
+    <color name="ctp_sky">#89DCEB</color>
+    <color name="ctp_teal">#94E2D5</color>
+    <color name="ctp_green">#A6E3A1</color>
+    <color name="ctp_yellow">#F9E2AF</color>
+    <color name="ctp_peach">#FAB387</color>
+    <color name="ctp_red">#F38BA8</color>
+    <color name="ctp_maroon">#EBA0AC</color>
+    <color name="ctp_pink">#F5C2E7</color>
+    <color name="ctp_flamingo">#F2CDCD</color>
+    <color name="ctp_rosewater">#F5E0DC</color>
+    <color name="ctp_lavender">#B4BEFE</color>
+
+    <!-- Semantic -->
+    <color name="color_primary">#CBA6F7</color>
+    <color name="color_primary_dim">#A679E5</color>
+    <color name="color_on_primary">#11111B</color>
+    <color name="color_secondary">#89B4FA</color>
+    <color name="color_success">#A6E3A1</color>
+    <color name="color_warning">#F9E2AF</color>
+    <color name="color_error">#F38BA8</color>
+    <color name="color_background">#1E1E2E</color>
+    <color name="color_surface">#313244</color>
+    <color name="color_toolbar">#181825</color>
+
+    <!-- Project accent swatches (for card borders) -->
+    <color name="accent_purple">#CBA6F7</color>
+    <color name="accent_blue">#89B4FA</color>
+    <color name="accent_green">#A6E3A1</color>
+    <color name="accent_red">#F38BA8</color>
+    <color name="accent_yellow">#F9E2AF</color>
+    <color name="accent_teal">#94E2D5</color>
+</resources>

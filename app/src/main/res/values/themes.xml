@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.DevStudio" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">#3574F0</item> 
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorPrimaryContainer">#3C3F41</item> 
+        <item name="colorOnPrimaryContainer">#DFE1E5</item>
+        <item name="colorSecondary">#4B6EAF</item>
+        <item name="colorOnSecondary">#FFFFFF</item>
+        <item name="colorSecondaryContainer">#313335</item>
+        <item name="colorOnSecondaryContainer">#A9B7C6</item>
+        <item name="colorTertiary">#BC9561</item> 
+        <item name="colorOnTertiary">#1C1C1C</item>
+        
+        <item name="android:colorBackground">#2B2B2B</item> 
+        <item name="android:windowBackground">#2B2B2B</item>
+        
+        <item name="colorOnBackground">#DFE1E5</item> 
+        <item name="colorSurface">#3C3F41</item> 
+        <item name="colorOnSurface">#DFE1E5</item>
+        <item name="colorSurfaceVariant">#313335</item> 
+        <item name="colorOnSurfaceVariant">#9EA4AA</item>
+        <item name="colorOutline">#4E5153</item> 
+        <item name="colorOutlineVariant">#43454A</item>
+        <item name="colorError">#FF5252</item>
+        <item name="colorOnError">#FFFFFF</item>
+        <item name="colorErrorContainer">#4E2222</item>
+        
+        <item name="android:statusBarColor">#3C3F41</item>
+        <item name="android:navigationBarColor">#2B2B2B</item>
+        <item name="android:textColorPrimary">#DFE1E5</item>
+        <item name="android:textColorSecondary">#9EA4AA</item>
+        <item name="toolbarStyle">@style/Widget.DevStudio.Toolbar</item>
+    </style>
+
+    <style name="Widget.DevStudio.Toolbar" parent="Widget.Material3.Toolbar">
+        <item name="android:background">#3C3F41</item>
+        <item name="titleTextColor">#DFE1E5</item>
+        <item name="subtitleTextColor">#9EA4AA</item>
+    </style>
+
+    <style name="Theme.DevStudio.Editor" parent="Theme.DevStudio">
+        <item name="android:windowSoftInputMode">adjustResize</item>
+    </style>
+
+    <style name="Dialog.DevStudio" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="colorSurface">#3C3F41</item>
+        <item name="colorOnSurface">#DFE1E5</item>
+        <item name="shapeAppearanceMediumComponent">@style/ShapeAppearance.DevStudio.Dialog</item>
+    </style>
+
+    <style name="ShapeAppearance.DevStudio.Dialog" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">8dp</item> 
+    </style>
+
+    <style name="Widget.DevStudio.Tab" parent="">
+        <item name="android:background">#3C3F41</item>
+        <item name="android:paddingHorizontal">12dp</item>
+        <item name="android:paddingVertical">6dp</item>
+    </style>
+
+    <style name="Widget.DevStudio.TagStyle" parent="">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginHorizontal">5dp</item>
+        <item name="android:paddingHorizontal">14dp</item>
+        <item name="android:paddingVertical">6dp</item>
+        <item name="android:background">@drawable/bg_tag_item</item>
+        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
+        <item name="android:textSize">12sp</item>
+    </style>
+
+    <style name="Widget.DevStudio" parent="">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginHorizontal">5dp</item>
+        <item name="android:paddingHorizontal">14dp</item>
+        <item name="android:paddingVertical">6dp</item>
+        <item name="android:background">@drawable/bg_tag_item</item>
+        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
+        <item name="android:textSize">12sp</item>
+    </style>
+</resources>
