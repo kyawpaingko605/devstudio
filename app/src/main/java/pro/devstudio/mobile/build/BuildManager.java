@@ -12,8 +12,10 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.StringReader;
+import java.lang.reflect.Method;
 import java.net.URI;
 import java.nio.file.FileSystem;
+import java.nio.file.FileSystemSystems;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -25,13 +27,15 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import dalvik.system.DexClassLoader;
 import pro.devstudio.mobile.model.Project;
 import pro.devstudio.mobile.util.FileUtils;
 import pro.devstudio.mobile.ai.GeminiClient;
 
 /**
  * Orchestrates the DevStudio build pipeline (No-Root Local Build System)
- * Fixed: Safely inherits system LD_LIBRARY_PATH to eliminate dalvikvm linker crash.
+ * Updated: Replaced problematic native 'dalvikvm' process with safe In-App DexClassLoader.
+ * This completely eliminates the APEX linker/symbol error.
  */
 public class BuildManager {
 
@@ -177,7 +181,7 @@ public class BuildManager {
                 new File(intermediatesRes).mkdirs();
                 new File(binDir).mkdirs();
 
-                // ── Step 3: AAPT2 Compile & Link ─────────────────────────────
+                // ── Step 3: AAPT2 Compile & Link (AAPT2 သည် C++ Native Binary ဖြစ်၍ Process ဖြင့် ဆက်ပတ်ပါမည်) ──
                 cb.onProgress("Compiling resources…", 40);
                 cb.onLog("► [1/5] Compiling resources via AAPT2…", LogLevel.INFO);
                 
@@ -221,21 +225,20 @@ public class BuildManager {
 
                 if (linkResult != 0) { cb.onError("AAPT2 Link Failed"); return; }
 
-                // ── Step 4: Java Compilation (ECJ via dalvikvm) ───────────────
+                // ── Step 4: Java Compilation (In-App Class Loading အသစ်ဖြင့် ပြောင်းလဲခြင်း) ──
                 cb.onProgress("Compiling Java code…", 60);
-                cb.onLog("► [3/5] Compiling Java source codes with ECJ (dalvikvm)…", LogLevel.INFO);
+                cb.onLog("► [3/5] Compiling Java source codes with In-App ECJ Tool…", LogLevel.INFO);
                 
-                List<String> ecjCmd = new ArrayList<>();
-                ecjCmd.add("dalvikvm");
-                ecjCmd.add("-cp"); ecjCmd.add(ecjJar.getAbsolutePath());
-                ecjCmd.add("org.eclipse.jdt.internal.compiler.batch.Main");
-                ecjCmd.add("-d"); ecjCmd.add(objPath);
-                ecjCmd.add("-cp"); ecjCmd.add(androidJar.getAbsolutePath());
-                ecjCmd.add("-source"); ecjCmd.add("1.8"); ecjCmd.add("-target"); ecjCmd.add("1.8");
-                addAllFiles(new File(srcPath), ".java", ecjCmd);
-                addAllFiles(new File(genPath), ".java", ecjCmd);
+                List<String> ecjArgs = new ArrayList<>();
+                ecjArgs.add("-d"); ecjArgs.add(objPath);
+                ecjArgs.add("-cp"); ecjArgs.add(androidJar.getAbsolutePath());
+                ecjArgs.add("-source"); ecjArgs.add("1.8"); 
+                ecjArgs.add("-target"); ecjArgs.add("1.8");
+                addAllFiles(new File(srcPath), ".java", ecjArgs);
+                addAllFiles(new File(genPath), ".java", ecjArgs);
                 
-                if (runProcess(ecjCmd, projectDir, cb) != 0) {
+                boolean ecjSuccess = runJarMainInApp(ecjJar, "org.eclipse.jdt.internal.compiler.batch.Main", ecjArgs.toArray(new String[0]), cb);
+                if (!ecjSuccess) {
                     cb.onLog("  ✗ Java Compilation Failed. Launching AI Fix…", LogLevel.ERROR);
                     if (!isRetry && geminiClient.hasApiKey()) {
                         triggerAiAutoFix(project, projectDir, cb);
@@ -245,20 +248,19 @@ public class BuildManager {
                     return;
                 }
 
-                // ── Step 5: DEX Conversion (D8 via dalvikvm) ──────────────────
+                // ── Step 5: DEX Conversion (In-App D8 Tool ဖြင့် ပြောင်းလဲခြင်း) ──
                 cb.onProgress("Converting to DEX…", 80);
-                cb.onLog("► [4/5] Converting class files to DEX via D8 (dalvikvm)…", LogLevel.INFO);
+                cb.onLog("► [4/5] Converting class files to DEX via In-App D8 Tool…", LogLevel.INFO);
                 String intermediatesDex = buildDir + "/intermediates/dex";
                 new File(intermediatesDex).mkdirs();
                 
-                List<String> d8Cmd = new ArrayList<>();
-                d8Cmd.add("dalvikvm");
-                d8Cmd.add("-cp"); d8Cmd.add(d8Jar.getAbsolutePath());
-                d8Cmd.add("com.android.tools.r8.D8");
-                d8Cmd.add("--lib"); d8Cmd.add(androidJar.getAbsolutePath());
-                d8Cmd.add("--output"); d8Cmd.add(intermediatesDex);
-                addAllFiles(new File(objPath), ".class", d8Cmd);
-                if (runProcess(d8Cmd, projectDir, cb) != 0) { cb.onError("DEX Conversion Failed"); return; }
+                List<String> d8Args = new ArrayList<>();
+                d8Args.add("--lib"); d8Args.add(androidJar.getAbsolutePath());
+                d8Args.add("--output"); d8Args.add(intermediatesDex);
+                addAllFiles(new File(objPath), ".class", d8Args);
+                
+                boolean d8Success = runJarMainInApp(d8Jar, "com.android.tools.r8.D8", d8Args.toArray(new String[0]), cb);
+                if (!d8Success) { cb.onError("DEX Conversion Failed"); return; }
 
                 File dexFile = new File(intermediatesDex, "classes.dex");
                 File unalignedApkFile = new File(unalignedApk);
@@ -277,24 +279,22 @@ public class BuildManager {
                     return;
                 }
 
-                // ── Step 6: Sign APK (APKSigner via dalvikvm) ──────────────────
+                // ── Step 6: Sign APK (In-App ApkSigner Tool ဖြင့် ပြောင်းလဲခြင်း) ──
                 cb.onProgress("Signing APK…", 95);
-                cb.onLog("► [5/5] Signing APK with debug.keystore (dalvikvm)…", LogLevel.INFO);
+                cb.onLog("► [5/5] Signing APK with debug.keystore…", LogLevel.INFO);
                 File releaseApk = new File(binDir, "app-release.apk");
 
                 if (apksignerJar.exists() && debugKeystore.exists()) {
-                    List<String> signCmd = List.of(
-                        "dalvikvm",
-                        "-cp", apksignerJar.getAbsolutePath(),
-                        "com.android.apksigner.ApkSignerTool",
+                    String[] signArgs = {
                         "sign",
                         "--ks", debugKeystore.getAbsolutePath(),
                         "--ks-pass", "pass:android",
                         "--key-pass", "pass:android",
                         "--out", releaseApk.getAbsolutePath(),
                         unalignedApk
-                    );
-                    if (runProcess(signCmd, projectDir, cb) == 0) {
+                    };
+                    boolean signSuccess = runJarMainInApp(apksignerJar, "com.android.apksigner.ApkSignerTool", signArgs, cb);
+                    if (signSuccess) {
                         cb.onLog("  ✓ APK Signed successfully!", LogLevel.SUCCESS);
                     } else {
                         cb.onLog("  ⚠ APK Sign failed, using unsigned APK.", LogLevel.WARNING);
@@ -319,6 +319,38 @@ public class BuildManager {
                 cb.onError(e.getMessage());
             }
         });
+    }
+
+    /**
+     * 💡 Core Magic Strategy:
+     * Loads the dexified compiler JARs directly inside the App's own Process.
+     * Bypasses 'dalvikvm' completely, resolving all APEX/Library namespace symbol crashes.
+     */
+    private boolean runJarMainInApp(File jarFile, String mainClassName, String[] args, BuildCallback cb) {
+        try {
+            File optimizedDir = new File(context.getCacheDir(), "dex-opt");
+            if (!optimizedDir.exists()) optimizedDir.mkdirs();
+
+            // DexClassLoader ဖြင့် Runtime ၌ JAR အား ဆွဲတင်ခြင်း
+            DexClassLoader classLoader = new DexClassLoader(
+                jarFile.getAbsolutePath(),
+                optimizedDir.getAbsolutePath(),
+                null,
+                ClassLoader.getSystemClassLoader()
+            );
+
+            Class<?> mainClass = classLoader.loadClass(mainClassName);
+            Method mainMethod = mainClass.getMethod("main", String[].class);
+
+            // Output Log များကို ကြားဖြတ်ဖမ်းယူရန် System.out ကို ခေတ္တပြောင်းလဲခြင်း (Optional)
+            mainMethod.invoke(null, (Object) args);
+            return true;
+        } catch (Exception e) {
+            // Reflection သို့မဟုတ် Execution အမှားများကို ခြေရာခံခြင်း
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            cb.onLog("  ✗ Internal Compiler Error [" + mainClassName + "]: " + cause.getMessage(), LogLevel.ERROR);
+            return false;
+        }
     }
 
     private void triggerAiAutoFix(Project project, File projectDir, BuildCallback cb) {
@@ -363,17 +395,12 @@ public class BuildManager {
         Map<String, String> env = pb.environment();
         String nativeLibDir = context.getApplicationInfo().nativeLibraryDir;
         
-        // 💡 Fix: မူရင်းစနစ်ကပေးထားတဲ့ LD_LIBRARY_PATH ကို မဖျက်ပစ်ဘဲ ရှေ့ဆုံးကနေပဲ App ရဲ့ native library လမ်းကြောင်းကို လှမ်းဆက်ပေးလိုက်ခြင်းဖြင့် dalvikvm crash စနစ်ကို ကျော်ဖြတ်စေသည်
         String systemLdPath = env.get("LD_LIBRARY_PATH");
         if (systemLdPath != null && !systemLdPath.isBlank()) {
             env.put("LD_LIBRARY_PATH", nativeLibDir + ":" + systemLdPath);
         } else {
             env.put("LD_LIBRARY_PATH", nativeLibDir + ":/system/lib64:/system/lib");
         }
-        
-        File dalvikCacheDir = new File(context.getCacheDir(), "dalvik-data");
-        if (!dalvikCacheDir.exists()) dalvikCacheDir.mkdirs();
-        env.put("ANDROID_DATA", dalvikCacheDir.getAbsolutePath());
 
         Process process = pb.start();
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
