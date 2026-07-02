@@ -24,6 +24,7 @@ import pro.devstudio.mobile.model.ChatMessage;
 /**
  * Calls Google Gemini API dynamically with multiple model support.
  * All callbacks arrive on OkHttp I/O threads — post to main thread before touching UI.
+ * Fixed: Replaced markdown URL with raw string endpoint.
  */
 public class GeminiClient {
 
@@ -72,7 +73,8 @@ public class GeminiClient {
     public void    saveSelectedModel(String model) { prefs().edit().putString(PREF_MODEL, model.trim()).apply(); }
 
     private String getApiUrl() {
-        return "[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/)" + getSelectedModel() + ":generateContent?key=";
+        // 💡 ပြင်ဆင်ချက်- Markdown brackets [ ] များကို ဖယ်ရှားပြီး သန့်ရှင်းသော Raw Endpoint String အဖြစ် ပြောင်းလဲလိုက်သည်
+        return "https://generativelanguage.googleapis.com/v1beta/models/" + getSelectedModel() + ":generateContent?key=";
     }
 
     // ── Core chat call ───────────────────────────────────────────────────────
