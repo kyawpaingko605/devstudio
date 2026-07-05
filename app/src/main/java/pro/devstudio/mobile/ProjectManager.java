@@ -120,14 +120,15 @@ public class ProjectManager {
     // ── Templates ─────────────────────────────────────────────────────────
 
     private String manifestXml(Project p) {
+        // Ensure manifest contains the package attribute so R.java is generated under the expected package
         return "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
-               "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n" +
+               "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\" package=\"" + p.packageName + "\">\n" +
                "    <application\n" +
                "        android:allowBackup=\"true\"\n" +
                "        android:label=\"" + p.name + "\"\n" +
                "        android:theme=\"@style/Theme.AppCompat.Light.DarkActionBar\">\n" +
                "        <activity\n" +
-               "            android:name=\"." + p.packageName + ".MainActivity\"\n" +
+               "            android:name=\".MainActivity\"\n" +
                "            android:exported=\"true\">\n" +
                "            <intent-filter>\n" +
                "                <action android:name=\"android.intent.action.MAIN\" />\n" +
@@ -139,10 +140,12 @@ public class ProjectManager {
     }
 
     private String mainActivityJava(Project p) {
+        // To support in-app compilation environments that may not have AndroidX on the classpath,
+        // use the framework Activity class instead of AppCompatActivity for scaffolded projects.
         return "package " + p.packageName + ";\n\n" +
-               "import androidx.appcompat.app.AppCompatActivity;\n" +
+               "import android.app.Activity;\n" +
                "import android.os.Bundle;\n\n" +
-               "public class MainActivity extends AppCompatActivity {\n\n" +
+               "public class MainActivity extends Activity {\n\n" +
                "    @Override\n" +
                "    protected void onCreate(Bundle savedInstanceState) {\n" +
                "        super.onCreate(savedInstanceState);\n" +
@@ -297,7 +300,8 @@ public class ProjectManager {
                "   ```\n\n" +
                "Notes:\n" +
                "- The project includes basic app module with a single Activity.\n" +
-               "- If you want to produce a signed release, configure signing in app/build.gradle or via Android Studio.\n";
+               "- If you want to produce a signed release, configure signing in app/build.gradle or via Android Studio.\n" +
+               "- For in-app compilation inside DevStudio, the IDE must provide the Android platform jars (android.jar) and any external libraries on the compiler classpath.\n";
     }
 
     private String gitignore() {
@@ -322,13 +326,13 @@ public class ProjectManager {
                "# Minimal gradlew script. The Gradle wrapper jar must be present under gradle/wrapper/gradle-wrapper.jar\n" +
                "# If missing, run 'gradle wrapper' on a machine with Gradle installed, or open the project in Android Studio.\n" +
                "DIRNAME=\"$(cd \"$(dirname \"$0\")\" && pwd)\"\n" +
-               "java -jar \"$DIRNAME/gradle/wrapper/gradle-wrapper.jar\" "$@"\n";
+               "java -jar \"$DIRNAME/gradle/wrapper/gradle-wrapper.jar\" \"$@\"\n";
     }
 
     private String gradlewBat() {
         return "@echo off\r\n" +
                "REM Minimal gradlew.bat stub. Requires gradle/wrapper/gradle-wrapper.jar\r\n" +
                "set DIRNAME=%~dp0\r\n" +
-               "java -jar "%DIRNAME%gradle\\wrapper\\gradle-wrapper.jar" %*\r\n";
+               "java -jar \"%DIRNAME%gradle\\wrapper\\gradle-wrapper.jar\" %*\r\n";
     }
 }
