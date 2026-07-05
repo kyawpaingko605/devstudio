@@ -72,7 +72,8 @@ public class GeminiClient {
     public void    saveSelectedModel(String model) { prefs().edit().putString(PREF_MODEL, model.trim()).apply(); }
 
     private String getApiUrl() {
-        return "[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/)" + getSelectedModel() + ":generateContent?key=";
+        // Fix: remove markdown-style link and return the proper REST endpoint
+        return "https://generativelanguage.googleapis.com/v1beta/models/" + getSelectedModel() + ":generateContent?key=";
     }
 
     // ── Core chat call ───────────────────────────────────────────────────────
@@ -135,12 +136,14 @@ public class GeminiClient {
                 @Override public void onResponse(Call call, Response response) throws IOException {
                     String bodyStr = response.body() != null ? response.body().string() : "";
                     if (!response.isSuccessful()) {
-                        onError.accept(switch (response.code()) {
+                        // Include response body for better debugging
+                        String message = switch (response.code()) {
                             case 400 -> "Invalid request / API key.";
                             case 403 -> "API key not authorized. Enable Generative Language API.";
                             case 429 -> "Rate limit hit — wait a moment and try again.";
-                            default  -> "API error " + response.code();
-                        });
+                            default  -> "API error " + response.code() + " - " + bodyStr;
+                        };
+                        onError.accept(message);
                         return;
                     }
                     try {
@@ -151,7 +154,7 @@ public class GeminiClient {
                                 .getString("text");
                         onSuccess.accept(text);
                     } catch (Exception e) {
-                        onError.accept("Parse error: " + e.getMessage());
+                        onError.accept("Parse error: " + e.getMessage() + " - raw: " + bodyStr);
                     }
                 }
             });
@@ -188,7 +191,7 @@ public class GeminiClient {
              List.of(), null, onSuccess, onError);
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────────────
+    // ── Helpers ─────────────────────────────────────────────────────────
 
     private void addTurn(JSONArray arr, String role, String text) throws Exception {
         arr.put(new JSONObject()
