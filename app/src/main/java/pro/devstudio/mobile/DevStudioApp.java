@@ -6,6 +6,9 @@ import io.github.rosemoe.sora.langs.textmate.registry.GrammarRegistry;
 import io.github.rosemoe.sora.langs.textmate.registry.ThemeRegistry;
 import io.github.rosemoe.sora.langs.textmate.registry.model.ThemeModel;
 import io.github.rosemoe.sora.langs.textmate.registry.provider.AssetsFileResolver;
+import android.util.Log;
+
+import pro.devstudio.mobile.util.ToolInstaller;
 
 public class DevStudioApp extends Application {
     @Override
@@ -16,5 +19,12 @@ public class DevStudioApp extends Application {
             FileProviderRegistry.getInstance().addFileProvider(
                 new AssetsFileResolver(getAssets()));
         } catch (Exception ignored) {}
+
+        // Install per-ABI native tools from assets/tools/ into internal files dir
+        try {
+            ToolInstaller.installAllFromAssets(this);
+        } catch (Exception e) {
+            Log.w("DevStudioApp", "ToolInstaller failed", e);
+        }
     }
 }
