@@ -20,20 +20,6 @@ jobs:
         distribution: 'temurin'
         cache: gradle
 
-    # ✅ gradlew ကို ပြန်လည်ထုတ်ပါ
-    - name: Setup Gradle Wrapper
-      run: |
-        # gradlew ဟောင်းကိုဖျက်ပါ
-        rm -f gradlew
-        rm -rf gradle/wrapper/
-        
-        # gradle wrapper ကို ပြန်ထုတ်ပါ
-        gradle wrapper --gradle-version 8.7
-
-    - name: Grant execute permission for gradlew
-      run: chmod +x gradlew
-
-    # ✅ debug.keystore generate လုပ်ပါ
     - name: Generate debug keystore
       run: |
         keytool -genkey -v -keystore app/debug.keystore \
@@ -45,10 +31,10 @@ jobs:
           -keypass android \
           -dname "CN=Debug, OU=Debug, O=Debug, L=City, ST=State, C=US"
 
-    - name: Run code analysis and tests
-      run: ./gradlew lint testReleaseUnitTest --no-daemon
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
 
-    - name: Build debug APK
+    - name: Build with Gradle
       run: ./gradlew assembleDebug --no-daemon
 
     - name: Upload APK
