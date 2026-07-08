@@ -29,10 +29,9 @@ public final class ToolInstaller {
 
     public static void installAllFromAssets(Context ctx) {
         AssetManager am = ctx.getAssets();
-        String base = "tools";
+        String base = "build-tools";  // ✅ build-tools ပြောင်းပါ
 
         try {
-            // Try each ABI in order and copy files found under tools/<abi>/*
             String[] abis = Build.SUPPORTED_ABIS;
             boolean anyInstalled = false;
 
@@ -50,7 +49,6 @@ public final class ToolInstaller {
                 }
             }
 
-            // Fallback: try files directly under tools/
             if (!anyInstalled) {
                 try {
                     String[] files = am.list(base);
@@ -71,7 +69,7 @@ public final class ToolInstaller {
 
     private static boolean copyAssetToFiles(Context ctx, String assetPath, String outName) {
         AssetManager am = ctx.getAssets();
-        File outDir = new File(ctx.getFilesDir(), "tools");
+        File outDir = new File(ctx.getFilesDir(), "build-tools");  // ✅ build-tools
         if (!outDir.exists()) outDir.mkdirs();
         File out = new File(outDir, outName);
 
@@ -82,21 +80,13 @@ public final class ToolInstaller {
             while ((r = is.read(buf)) > 0) os.write(buf, 0, r);
             os.getFD().sync();
 
-            // Try setExecutable and fallback to chmod
-            boolean execSet = out.setExecutable(true);
-            if (!execSet) {
-                try {
-                    Runtime.getRuntime().exec(new String[]{"chmod", "755", out.getAbsolutePath()}).waitFor();
-                } catch (Exception e) {
-                    Log.w(TAG, "Failed to chmod via shell", e);
-                }
-            }
-
-            Log.i(TAG, "Installed tool: " + out.getAbsolutePath());
+            // ✅ No-root အတွက် setExecutable() ကိုပဲသုံး
+            boolean execSet = out.setExecutable(true, false);
+            Log.i(TAG, "Installed tool: " + out.getAbsolutePath() + ", executable=" + execSet);
             return true;
         } catch (IOException e) {
-            // asset doesn't exist or copy failed
+            Log.w(TAG, "Failed to copy " + assetPath, e);
             return false;
         }
     }
-}
+                   }
