@@ -1,12 +1,14 @@
 package pro.devstudio.mobile;
 
 import android.app.Activity;
+import android.app.ProgressDialog;
 import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.util.Log;
 import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Toast;
@@ -20,6 +22,7 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
+import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -48,18 +51,16 @@ public class MainActivity extends AppCompatActivity {
             "#CBA6F7", "#89B4FA", "#A6E3A1", "#F38BA8", "#F9E2AF", "#94E2D5"
     };
 
-    // ── Folder Picker Launcher (Android 11+ သဟဇာတဖြစ်အောင် OPEN_DOCUMENT_TREE သုံးထားသည်) ──
+    // ── Folder Picker Launcher ──
     private final ActivityResultLauncher<Intent> folderPickerLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
             result -> {
                 if (result.getResultCode() == Activity.RESULT_OK && result.getData() != null) {
                     Uri treeUri = result.getData().getData();
                     if (treeUri != null) {
-                        // Folder ရွေးချယ်ပြီးနောက် Persistent Permission ရယူခြင်း
                         final int takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION 
                                             | Intent.FLAG_GRANT_WRITE_URI_PERMISSION;
                         getContentResolver().takePersistableUriPermission(treeUri, takeFlags);
-                        
                         handleOpenExternalProject(treeUri);
                     }
                 }
@@ -72,19 +73,7 @@ public class MainActivity extends AppCompatActivity {
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
 
-        // ✅ CodeAssist ပုံစံအတိုင်း- App စပွင့်ချင်း Background Thread ဖြင့် assets zip ကို ဖြည်ချဆောက်ပေးခြင်း
-        new Thread(() -> {
-            try {
-                File internalToolsDir = new File(getFilesDir(), "build-tools");
-                // ဖုန်းထဲမှာ build-tools folder မရှိသေးရင် အသစ်ဆောက်ပြီး zip ကို ဖြည်ချပါမည်
-                if (!internalToolsDir.exists()) {
-                    internalToolsDir.mkdirs();
-                    extractAssetsZip("build-tools/build-tools.zip", internalToolsDir);
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }).start();
+        checkAndExtractTools();
 
         // Edge-to-edge
         ViewCompat.setOnApplyWindowInsetsListener(binding.getRoot(), (v, insets) -> {
@@ -115,14 +104,10 @@ public class MainActivity extends AppCompatActivity {
 
         updateEmptyState();
 
-        // ── Welcome Screen Buttons Click Listeners ──
         binding.btnNewProject.setOnClickListener(v -> showNewProjectDialog());
         binding.btnOpenProject.setOnClickListener(v -> openSystemFolderPicker());
-
-        // မူရင်း FAB အလုပ်လုပ်ပုံ
         binding.fabNewProject.setOnClickListener(v -> showNewProjectDialog());
 
-        // Toolbar menu
         binding.toolbar.inflateMenu(R.menu.menu_main);
         binding.toolbar.setOnMenuItemClickListener(item -> {
             if (item.getItemId() == R.id.action_settings) {
@@ -133,34 +118,90 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    // ✅ Assets Zip ကို ဖတ်ပြီး စနစ်တကျ Internal Storage ထဲ ဖြည်ချပေးမည့် Method
-    private void extractAssetsZip(String zipFilePath, File targetDir) throws IOException {
-        try (InputStream is = getAssets().open(zipFilePath);
-             ZipInputStream zis = new ZipInputStream(is)) {
-            
-            ZipEntry entry;
-            while ((entry = zis.getNextEntry()) != null) {
-                File outputFile = new File(targetDir, entry.getName());
-                
-                if (entry.isDirectory()) {
-                    outputFile.mkdirs();
-                } else {
-                    outputFile.getParentFile().mkdirs();
-                    try (FileOutputStream fos = new FileOutputStream(outputFile)) {
-                        byte[] buffer = new byte[4096];
-                        int len;
-                        while ((len = zis.read(buffer)) != -1) {
-                            fos.write(buffer, 0, len);
+    // ✅ Build Tools ဖြည်ချခြင်း
+    private void checkAndExtractTools() {
+        File internalToolsDir = new File(getFilesDir(), "build-tools");
+        
+        if (!internalToolsDir.exists()) {
+            internalToolsDir.mkdirs();
+
+            ProgressDialog progressDialog = new ProgressDialog(this);
+            progressDialog.setTitle("System Setup");
+            progressDialog.setMessage("Initializing local build tools...");
+            progressDialog.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
+            progressDialog.setCancelable(false);
+            progressDialog.setMax(100);
+            progressDialog.show();
+
+            new Thread(() -> {
+                boolean success = false;
+                try {
+                    long totalSize = 0;
+                    try (InputStream testIs = getAssets().open("build-tools/build-tools.zip");
+                         ZipInputStream testZis = new ZipInputStream(testIs)) {
+                        ZipEntry ze;
+                        while ((ze = testZis.getNextEntry()) != null) {
+                            if (!ze.isDirectory()) {
+                                totalSize += ze.getSize();
+                            }
+                            testZis.closeEntry();
                         }
                     }
-                    
-                    // Executable permission သတ်မှတ်ပေးခြင်း (Jar မဟုတ်သော runtime binaries များအတွက်)
-                    if (!entry.getName().endsWith(".jar") && !entry.getName().endsWith(".keystore")) {
-                        outputFile.setExecutable(true, false);
+
+                    if (totalSize <= 0) totalSize = 1;
+
+                    try (InputStream is = getAssets().open("build-tools/build-tools.zip");
+                         ZipInputStream zis = new ZipInputStream(new BufferedInputStream(is))) {
+                        
+                        ZipEntry entry;
+                        byte[] buffer = new byte[8192];
+                        long extractedBytes = 0;
+
+                        while ((entry = zis.getNextEntry()) != null) {
+                            File outputFile = new File(internalToolsDir, entry.getName());
+                            
+                            final String currentFileName = entry.getName();
+                            runOnUiThread(() -> progressDialog.setMessage("Extracting: " + currentFileName));
+
+                            if (entry.isDirectory()) {
+                                outputFile.mkdirs();
+                            } else {
+                                File parent = outputFile.getParentFile();
+                                if (parent != null && !parent.exists()) parent.mkdirs();
+
+                                try (FileOutputStream fos = new FileOutputStream(outputFile)) {
+                                    int len;
+                                    while ((len = zis.read(buffer)) != -1) {
+                                        fos.write(buffer, 0, len);
+                                        extractedBytes += len;
+                                        
+                                        int percent = (int) ((extractedBytes * 100) / totalSize);
+                                        runOnUiThread(() -> progressDialog.setProgress(Math.min(percent, 100)));
+                                    }
+                                }
+                                
+                                if (!entry.getName().endsWith(".jar") && !entry.getName().endsWith(".keystore")) {
+                                    outputFile.setExecutable(true, false);
+                                }
+                            }
+                            zis.closeEntry();
+                        }
+                        success = true;
                     }
+                } catch (IOException e) {
+                    Log.e("DevStudio_Extract", "Extraction error: " + e.getMessage());
                 }
-                zis.closeEntry();
-            }
+
+                final boolean finalSuccess = success;
+                runOnUiThread(() -> {
+                    if (progressDialog.isShowing()) progressDialog.dismiss();
+                    if (finalSuccess) {
+                        Toast.makeText(MainActivity.this, "✓ System tools configured successfully!", Toast.LENGTH_SHORT).show();
+                    } else {
+                        Toast.makeText(MainActivity.this, "✗ Configuration failed! Please clear data and retry.", Toast.LENGTH_LONG).show();
+                    }
+                });
+            }).start();
         }
     }
 
@@ -219,7 +260,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ── External Folder Picker Logic (Android 11+ Storage စနစ်အတိုင်း) ──
+    // ── External Folder Picker ──
 
     private void openSystemFolderPicker() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
