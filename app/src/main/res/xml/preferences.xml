@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <!-- ── AI ── -->
+    <PreferenceCategory android:title="AI Assistant">
+
+        <EditTextPreference
+            android:key="gemini_api_key"
+            android:title="Gemini API Key"
+            android:summary="Get a free key at aistudio.google.com/app/apikey"
+            android:inputType="textPassword"
+            app:useSimpleSummaryProvider="false" />
+
+    </PreferenceCategory>
+
+    <!-- ── Editor ── -->
+    <PreferenceCategory android:title="Code Editor">
+
+        <SeekBarPreference
+            android:key="editor_font_size"
+            android:title="Font Size"
+            android:defaultValue="14"
+            android:summary="Current: %s sp"
+            app:showSeekBarValue="true" />
+
+        <SwitchPreferenceCompat
+            android:key="word_wrap"
+            android:title="Word Wrap"
+            android:summary="Wrap long lines instead of scrolling horizontally"
+            android:defaultValue="false" />
+
+        <SwitchPreferenceCompat
+            android:key="auto_save"
+            android:title="Auto Save"
+            android:summary="Automatically save files while you type"
+            android:defaultValue="true" />
+
+    </PreferenceCategory>
+
+    <!-- ── Appearance ── -->
+    <PreferenceCategory android:title="Appearance">
+
+        <SwitchPreferenceCompat
+            android:key="amoled_black"
+            android:title="AMOLED Black"
+            android:summary="Use pure black background (saves battery on OLED screens)"
+            android:defaultValue="false" />
+
+    </PreferenceCategory>
+
+    <!-- ── Build ── -->
+    <PreferenceCategory android:title="Build">
+
+        <Preference
+            android:key="termux_info"
+            android:title="Termux Integration"
+            android:summary="Install Termux from F-Droid for APK compilation support" />
+
+    </PreferenceCategory>
+
+</PreferenceScreen>

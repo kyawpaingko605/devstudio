@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@color/ctp_surface0"
+    android:orientation="vertical"
+    android:paddingBottom="24dp">
+
+    <!-- Handle -->
+    <View
+        android:layout_width="40dp"
+        android:layout_height="4dp"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginTop="12dp"
+        android:layout_marginBottom="16dp"
+        android:background="@color/ctp_surface2" />
+
+    <!-- Title -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="20dp"
+        android:paddingBottom="16dp">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="✓  Build Complete"
+            android:textColor="@color/ctp_green"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
+
+    <View android:layout_width="match_parent" android:layout_height="1dp"
+        android:background="@color/ctp_surface1"
+        android:layout_marginBottom="12dp" />
+
+    <!-- Share ZIP -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_share_zip"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginBottom="8dp"
+        android:text="📦  Share ZIP (Source Files)"
+        android:textColor="@color/ctp_crust"
+        app:backgroundTint="@color/ctp_blue"
+        app:cornerRadius="10dp" />
+
+    <!-- Share APK (hidden until APK available) -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_share_apk"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginBottom="8dp"
+        android:text="📱  Share APK"
+        android:textColor="@color/ctp_crust"
+        app:backgroundTint="@color/ctp_green"
+        app:cornerRadius="10dp"
+        android:visibility="gone" />
+
+    <!-- Copy path -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_copy_path"
+        style="@style/Widget.Material3.Button.OutlinedButton"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:layout_marginHorizontal="16dp"
+        android:text="Copy ZIP Path"
+        android:textColor="@color/ctp_subtext0"
+        app:cornerRadius="10dp"
+        app:strokeColor="@color/ctp_surface1" />
+
+</LinearLayout>

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="36dp"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:background="?attr/selectableItemBackground"
+    android:clickable="true"
+    android:focusable="true">
+
+    <!-- Depth indent spacer -->
+    <View
+        android:id="@+id/view_indent"
+        android:layout_width="0dp"
+        android:layout_height="match_parent" />
+
+    <!-- Expand/file icon -->
+    <TextView
+        android:id="@+id/tv_icon"
+        android:layout_width="22dp"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:textColor="@color/ctp_subtext0"
+        android:textSize="13sp" />
+
+    <!-- File name -->
+    <TextView
+        android:id="@+id/tv_file_name"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:fontFamily="monospace"
+        android:paddingEnd="4dp"
+        android:singleLine="true"
+        android:textColor="@color/ctp_text"
+        android:textSize="13sp" />
+
+    <!-- Language badge -->
+    <TextView
+        android:id="@+id/tv_badge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginEnd="10dp"
+        android:background="@drawable/bg_badge"
+        android:paddingHorizontal="6dp"
+        android:paddingVertical="1dp"
+        android:textColor="@color/ctp_blue"
+        android:textSize="9sp"
+        android:visibility="gone" />
+
+</LinearLayout>

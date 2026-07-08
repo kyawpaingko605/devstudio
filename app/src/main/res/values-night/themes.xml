@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.DevStudio" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">#3574F0</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorPrimaryContainer">#FFFFFF</item>
+        <item name="colorOnPrimaryContainer">#1C1C1C</item>
+        <item name="colorSecondary">#389FD6</item>
+        <item name="colorOnSecondary">#FFFFFF</item>
+        <item name="colorSecondaryContainer">#F7F8FA</item>
+        <item name="colorOnSecondaryContainer">#1C1C1C</item>
+        <item name="colorTertiary">#008000</item> 
+        <item name="colorOnTertiary">#FFFFFF</item>
+        
+        <item name="android:colorBackground">#F7F8FA</item> 
+        <item name="android:windowBackground">#F7F8FA</item>
+        
+        <item name="colorOnBackground">#1C1C1C</item>
+        <item name="colorSurface">#FFFFFF</item> 
+        <item name="colorOnSurface">#1C1C1C</item>
+        <item name="colorSurfaceVariant">#EBECF0</item>
+        <item name="colorOnSurfaceVariant">#6C707E</item>
+        <item name="colorOutline">#D1D4DC</item>
+        <item name="colorOutlineVariant">#EBECF0</item>
+        <item name="colorError">#D32F2F</item>
+        <item name="colorOnError">#FFFFFF</item>
+        <item name="colorErrorContainer">#FFCDD2</item>
+        
+        <item name="android:statusBarColor">#FFFFFF</item>
+        <item name="android:navigationBarColor">#F7F8FA</item>
+        <item name="android:textColorPrimary">#1C1C1C</item>
+        <item name="android:textColorSecondary">#6C707E</item>
+        <item name="toolbarStyle">@style/Widget.DevStudio.Toolbar</item>
+    </style>
+
+    <style name="Widget.DevStudio.Toolbar" parent="Widget.Material3.Toolbar">
+        <item name="android:background">#FFFFFF</item>
+        <item name="titleTextColor">#1C1C1C</item>
+        <item name="subtitleTextColor">#6C707E</item>
+    </style>
+
+    <style name="Theme.DevStudio.Editor" parent="Theme.DevStudio">
+        <item name="android:windowSoftInputMode">adjustResize</item>
+    </style>
+
+    <style name="Dialog.DevStudio" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="colorSurface">#FFFFFF</item>
+        <item name="colorOnSurface">#1C1C1C</item>
+        <item name="shapeAppearanceMediumComponent">@style/ShapeAppearance.DevStudio.Dialog</item>
+    </style>
+
+    <style name="ShapeAppearance.DevStudio.Dialog" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">8dp</item>
+    </style>
+
+    <style name="Widget.DevStudio.Tab" parent="">
+        <item name="android:background">#FFFFFF</item>
+        <item name="android:paddingHorizontal">12dp</item>
+        <item name="android:paddingVertical">6dp</item>
+    </style>
+</resources>

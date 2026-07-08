@@ -1,0 +1,3 @@
+-keep class pro.devstudio.mobile.model.** { *; }
+-keep class io.github.rosemoe.** { *; }
+-dontwarn io.github.rosemoe.**
