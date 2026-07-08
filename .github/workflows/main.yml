@@ -8,12 +8,12 @@ on:
 
 jobs:
   build:
+
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v4
-
+    - uses: actions/checkout@v4
+    
     - name: Set up JDK 17
       uses: actions/setup-java@v4
       with:
@@ -21,26 +21,37 @@ jobs:
         distribution: 'temurin'
         cache: gradle
 
-    # Gradle Version ကို 8.7 သို့ တိုးမြှင့်ပြီး အလိုအလျောက် ဆောက်ခိုင်းမည်
-    - name: Generate Gradle Wrapper Automatically
+    # ✅ debug.keystore ကို auto-generate လုပ်ပါ (မူလကုတ်မပျက်စေရန်)
+    - name: Generate debug keystore
       run: |
-        npm install -g gradle
-        gradle wrapper --gradle-version 8.7
+        keytool -genkey -v -keystore app/debug.keystore \
+          -alias androiddebugkey \
+          -keyalg RSA \
+          -keysize 2048 \
+          -validity 10000 \
+          -storepass android \
+          -keypass android \
+          -dname "CN=Debug, OU=Debug, O=Debug, L=City, ST=State, C=US"
+
+    # ✅ Gradle Wrapper ရှိရင် သုံးမယ်၊ မရှိရင် generate လုပ်မယ်
+    - name: Setup Gradle Wrapper
+      run: |
+        if [ ! -f gradlew ]; then
+          gradle wrapper --gradle-version 8.7
+        fi
 
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
-    # Error စစ်ဆေးရန် (Lint & Unit Tests)
-    - name: Run Code Analysis and Tests
-      run: ./gradlew lint testReleaseUnitTest
+    - name: Run code analysis and tests
+      run: ./gradlew lint testReleaseUnitTest --no-daemon
 
-    # APK Build ထုတ်ရန် (ဖုန်းထဲသွင်းလို့ရအောင် assembleDebug သို့ ပြောင်းလဲထားပါသည်)
-    - name: Build Android APK
-      run: ./gradlew assembleDebug
+    - name: Build debug APK
+      run: ./gradlew assembleDebug --no-daemon
 
-    # ထွက်လာမယ့် Debug APK ကို သိမ်းဆည်းရန်
-    - name: Upload APK Artifact
+    - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
         name: app-debug-apk
         path: app/build/outputs/apk/debug/*.apk
+        retention-days: 30
