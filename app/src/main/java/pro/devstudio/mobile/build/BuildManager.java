@@ -172,10 +172,18 @@ public class BuildManager {
             cb.onLog("  ✗ Critical: Build tools not found! Please restart the app.", LogLevel.ERROR);
             throw new IOException("Build tools directory missing.");
         }
+        
+        // ✅ Oppo A17 အတွက် aapt2 permission ကိုစစ်ပါ
+        File aapt2 = new File(jarToolsDir, "aapt2");
+        if (aapt2.exists() && !aapt2.canExecute()) {
+            cb.onLog("  ℹ Setting execute permission for aapt2...", LogLevel.INFO);
+            aapt2.setExecutable(true, false);
+        }
+        
         cb.onLog("  ✓ Internal build-tools verified successfully.", LogLevel.SUCCESS);
     }
 
-    // ✅ No-root အတွက် AAPT2 Binary ကို Process ဖြင့် Run ခြင်း
+    // ✅ Oppo A17 No-root အတွက် AAPT2 Process
     private int runAapt2Binary(String[] args, BuildCallback cb) {
         try {
             File toolsDir = new File(context.getFilesDir(), "build-tools");
@@ -186,20 +194,15 @@ public class BuildManager {
                 return -1;
             }
 
-            // ✅ No-root အတွက် Java နဲ့ Permission ပေးပါ
+            // ✅ Oppo A17 အတွက် execute permission စစ်ပါ
             if (!aapt2Binary.canExecute()) {
-                cb.onLog("  ℹ Setting execute permission for aapt2...", LogLevel.INFO);
-                boolean setExecutable = aapt2Binary.setExecutable(true, false);
-                if (setExecutable) {
-                    cb.onLog("  ✓ Execute permission set successfully via Java.", LogLevel.SUCCESS);
+                cb.onLog("  ℹ Setting execute permission for aapt2 (Oppo A17)...", LogLevel.INFO);
+                boolean success = aapt2Binary.setExecutable(true, false);
+                if (success) {
+                    cb.onLog("  ✓ Execute permission set successfully.", LogLevel.SUCCESS);
                 } else {
-                    cb.onLog("  ⚠ Java setExecutable returned false, but continuing...", LogLevel.WARNING);
+                    cb.onLog("  ⚠ setExecutable returned false, trying alternative...", LogLevel.WARNING);
                 }
-            }
-
-            // ✅ ပြန်စစ်ပါ (No-root မှာ canExecute() က false ပြန်နိုင်တယ်)
-            if (!aapt2Binary.canExecute()) {
-                cb.onLog("  ℹ Note: canExecute() returned false, but trying to run anyway (No-root).", LogLevel.INFO);
             }
 
             // ✅ aapt2 ကို Process နဲ့ Run ပါ
@@ -209,10 +212,15 @@ public class BuildManager {
                 command.add(arg);
             }
 
-            cb.onLog("  ℹ Running: " + String.join(" ", command), LogLevel.INFO);
+            cb.onLog("  ℹ Running AAPT2 command...", LogLevel.INFO);
 
             ProcessBuilder pb = new ProcessBuilder(command);
             pb.redirectErrorStream(true);
+            
+            // ✅ Oppo A17 အတွက် environment variables ထည့်ပါ
+            Map<String, String> env = pb.environment();
+            env.put("LD_LIBRARY_PATH", toolsDir.getAbsolutePath() + ":/system/lib64:/system/lib");
+            
             Process process = pb.start();
 
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
@@ -235,7 +243,7 @@ public class BuildManager {
         }
     }
 
-    // ✅ D8 + R8 Fallback System (No-root အတွက်)
+    // ✅ D8 + R8 Fallback System (Oppo A17 အတွက်)
     private boolean convertToDexWithFallback(File toolsDir, File androidJar, String intermediatesDex, 
                                                List<String> classFiles, BuildCallback cb) {
         
@@ -372,7 +380,7 @@ public class BuildManager {
 
                 // ── Step 1: AAPT2 Compile ────────────────────────────────────
                 cb.onProgress("Compiling resources…", 40);
-                cb.onLog("► [1/5] Compiling resources via AAPT2...", LogLevel.INFO);
+                cb.onLog("► [1/5] Compiling resources via AAPT2 Process...", LogLevel.INFO);
 
                 String[] compileArgs = {
                     "compile",
