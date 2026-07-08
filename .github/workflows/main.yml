@@ -31,10 +31,15 @@ jobs:
           -keypass android \
           -dname "CN=Debug, OU=Debug, O=Debug, L=City, ST=State, C=US"
 
-    # ✅ gradle wrapper မသုံးဘဲ gradle ကိုတိုက်ရိုက်သုံးပါ
-    - name: Build APK with Gradle
+    - name: Setup Gradle 8.7
       run: |
-        gradle assembleDebug --no-daemon
+        rm -rf gradle/wrapper/
+        rm -f gradlew gradlew.bat
+        gradle wrapper --gradle-version 8.7
+        chmod +x gradlew
+
+    - name: Build APK
+      run: ./gradlew assembleDebug --no-daemon
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
