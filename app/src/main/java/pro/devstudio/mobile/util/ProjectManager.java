@@ -76,15 +76,15 @@ public class ProjectManager {
         resLayout.mkdirs();
         resValues.mkdirs();
 
-        // Manifest
+        // Manifest (Holo theme)
         FileUtils.writeFile(new File(root, "app/src/main/AndroidManifest.xml"),
                 manifestXml(p));
 
-        // Main activity
+        // Main activity (Activity, not AppCompatActivity)
         FileUtils.writeFile(new File(javaDir, "MainActivity.java"),
                 mainActivityJava(p));
 
-        // Layout
+        // Layout (with ids for button and textview)
         FileUtils.writeFile(new File(resLayout, "activity_main.xml"),
                 templateLayout(p.template));
 
@@ -92,7 +92,7 @@ public class ProjectManager {
         FileUtils.writeFile(new File(resValues, "strings.xml"),
                 "<resources>\n    <string name=\"app_name\">" + p.name + "</string>\n</resources>\n");
 
-        // build.gradle (app)
+        // app/build.gradle
         FileUtils.writeFile(new File(root, "app/build.gradle"), appGradle(p));
 
         // Root build.gradle
@@ -106,15 +106,16 @@ public class ProjectManager {
 
     // ── Templates ────────────────────────────────────────────────────────────
 
+    // ✅ Manifest - Holo theme
     private String manifestXml(Project p) {
         return "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
-               "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n" +
+               "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\" package=\"" + p.packageName + "\">\n" +
                "    <application\n" +
                "        android:allowBackup=\"true\"\n" +
                "        android:label=\"" + p.name + "\"\n" +
-               "        android:theme=\"@style/Theme.AppCompat.Light.DarkActionBar\">\n" +
+               "        android:theme=\"@android:style/Theme.Holo.Light.DarkActionBar\">\n" +
                "        <activity\n" +
-               "            android:name=\"." + p.packageName + ".MainActivity\"\n" +
+               "            android:name=\".MainActivity\"\n" +
                "            android:exported=\"true\">\n" +
                "            <intent-filter>\n" +
                "                <action android:name=\"android.intent.action.MAIN\" />\n" +
@@ -125,19 +126,36 @@ public class ProjectManager {
                "</manifest>\n";
     }
 
+    // ✅ MainActivity - uses Activity, getIdentifier, no Lambda
     private String mainActivityJava(Project p) {
         return "package " + p.packageName + ";\n\n" +
-               "import androidx.appcompat.app.AppCompatActivity;\n" +
-               "import android.os.Bundle;\n\n" +
-               "public class MainActivity extends AppCompatActivity {\n\n" +
+               "import android.app.Activity;\n" +
+               "import android.os.Bundle;\n" +
+               "import android.widget.Button;\n" +
+               "import android.widget.TextView;\n\n" +
+               "public class MainActivity extends Activity {\n" +
                "    @Override\n" +
                "    protected void onCreate(Bundle savedInstanceState) {\n" +
                "        super.onCreate(savedInstanceState);\n" +
-               "        setContentView(R.layout.activity_main);\n" +
+               "        int layoutId = getResources().getIdentifier(\"activity_main\", \"layout\", getPackageName());\n" +
+               "        setContentView(layoutId);\n\n" +
+               "        int tvId = getResources().getIdentifier(\"tv_title\", \"id\", getPackageName());\n" +
+               "        int btnId = getResources().getIdentifier(\"btn_click\", \"id\", getPackageName());\n" +
+               "        final TextView tv = findViewById(tvId);\n" +
+               "        Button btn = findViewById(btnId);\n\n" +
+               "        if (btn != null && tv != null) {\n" +
+               "            btn.setOnClickListener(new android.view.View.OnClickListener() {\n" +
+               "                @Override\n" +
+               "                public void onClick(android.view.View v) {\n" +
+               "                    tv.setText(\"DevStudio APK Works Successfully!\");\n" +
+               "                }\n" +
+               "            });\n" +
+               "        }\n" +
                "    }\n" +
                "}\n";
     }
 
+    // ✅ Layout with ids
     private String templateLayout(String template) {
         return switch (template) {
             case "login" -> loginLayout();
@@ -152,13 +170,24 @@ public class ProjectManager {
                "<LinearLayout xmlns:android=\"http://schemas.android.com/apk/res/android\"\n" +
                "    android:layout_width=\"match_parent\"\n" +
                "    android:layout_height=\"match_parent\"\n" +
+               "    android:orientation=\"vertical\"\n" +
                "    android:gravity=\"center\"\n" +
-               "    android:orientation=\"vertical\">\n\n" +
+               "    android:background=\"#FFFFFF\"\n" +
+               "    android:padding=\"20dp\">\n\n" +
                "    <TextView\n" +
+               "        android:id=\"@+id/tv_title\"\n" +
                "        android:layout_width=\"wrap_content\"\n" +
                "        android:layout_height=\"wrap_content\"\n" +
-               "        android:text=\"Hello, World!\"\n" +
-               "        android:textSize=\"24sp\" />\n\n" +
+               "        android:text=\"Welcome to DevStudio Local Build!\"\n" +
+               "        android:textSize=\"20sp\"\n" +
+               "        android:textColor=\"#000000\"\n" +
+               "        android:layout_marginBottom=\"24dp\"\n" +
+               "        android:textStyle=\"bold\"/>\n\n" +
+               "    <Button\n" +
+               "        android:id=\"@+id/btn_click\"\n" +
+               "        android:layout_width=\"wrap_content\"\n" +
+               "        android:layout_height=\"wrap_content\"\n" +
+               "        android:text=\"Test Interaction\" />\n\n" +
                "</LinearLayout>\n";
     }
 
@@ -169,8 +198,10 @@ public class ProjectManager {
                "    android:layout_height=\"match_parent\"\n" +
                "    android:gravity=\"center\"\n" +
                "    android:orientation=\"vertical\"\n" +
-               "    android:padding=\"24dp\">\n\n" +
+               "    android:padding=\"24dp\"\n" +
+               "    android:background=\"#FFFFFF\">\n\n" +
                "    <TextView\n" +
+               "        android:id=\"@+id/tv_title\"\n" +
                "        android:layout_width=\"wrap_content\"\n" +
                "        android:layout_height=\"wrap_content\"\n" +
                "        android:text=\"Sign In\"\n" +
@@ -205,7 +236,8 @@ public class ProjectManager {
                "    xmlns:android=\"http://schemas.android.com/apk/res/android\"\n" +
                "    xmlns:app=\"http://schemas.android.com/apk/res-auto\"\n" +
                "    android:layout_width=\"match_parent\"\n" +
-               "    android:layout_height=\"match_parent\">\n\n" +
+               "    android:layout_height=\"match_parent\"\n" +
+               "    android:background=\"#FFFFFF\">\n\n" +
                "    <com.google.android.material.appbar.AppBarLayout\n" +
                "        android:layout_width=\"match_parent\"\n" +
                "        android:layout_height=\"wrap_content\">\n" +
@@ -215,11 +247,14 @@ public class ProjectManager {
                "            app:title=\"My App\" />\n" +
                "    </com.google.android.material.appbar.AppBarLayout>\n\n" +
                "    <TextView\n" +
+               "        android:id=\"@+id/tv_title\"\n" +
                "        android:layout_width=\"wrap_content\"\n" +
                "        android:layout_height=\"wrap_content\"\n" +
                "        android:text=\"Hello!\"\n" +
+               "        android:textSize=\"24sp\"\n" +
                "        app:layout_behavior=\"@string/appbar_scrolling_view_behavior\" />\n\n" +
                "    <com.google.android.material.floatingactionbutton.FloatingActionButton\n" +
+               "        android:id=\"@+id/fab\"\n" +
                "        android:layout_width=\"wrap_content\"\n" +
                "        android:layout_height=\"wrap_content\"\n" +
                "        android:layout_gravity=\"bottom|end\"\n" +
@@ -233,7 +268,16 @@ public class ProjectManager {
                "<LinearLayout xmlns:android=\"http://schemas.android.com/apk/res/android\"\n" +
                "    android:layout_width=\"match_parent\"\n" +
                "    android:layout_height=\"match_parent\"\n" +
-               "    android:orientation=\"vertical\">\n\n" +
+               "    android:orientation=\"vertical\"\n" +
+               "    android:background=\"#FFFFFF\">\n\n" +
+               "    <TextView\n" +
+               "        android:id=\"@+id/tv_title\"\n" +
+               "        android:layout_width=\"wrap_content\"\n" +
+               "        android:layout_height=\"wrap_content\"\n" +
+               "        android:text=\"My List\"\n" +
+               "        android:textSize=\"24sp\"\n" +
+               "        android:textStyle=\"bold\"\n" +
+               "        android:layout_margin=\"16dp\" />\n\n" +
                "    <androidx.recyclerview.widget.RecyclerView\n" +
                "        android:id=\"@+id/recyclerView\"\n" +
                "        android:layout_width=\"match_parent\"\n" +
@@ -268,4 +312,4 @@ public class ProjectManager {
     private SharedPreferences prefs() {
         return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
     }
-}
+            }
