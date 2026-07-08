@@ -31,11 +31,10 @@ jobs:
           -keypass android \
           -dname "CN=Debug, OU=Debug, O=Debug, L=City, ST=State, C=US"
 
-    - name: Grant execute permission for gradlew
-      run: chmod +x gradlew
-
-    - name: Build with Gradle
-      run: ./gradlew assembleDebug --no-daemon
+    # ✅ gradle wrapper မသုံးဘဲ gradle ကိုတိုက်ရိုက်သုံးပါ
+    - name: Build APK with Gradle
+      run: |
+        gradle assembleDebug --no-daemon
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
