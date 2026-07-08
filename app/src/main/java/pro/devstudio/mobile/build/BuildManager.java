@@ -168,289 +168,58 @@ public class BuildManager {
 
     private void prepareLocalTools(BuildCallback cb) throws IOException {
         File jarToolsDir = new File(context.getFilesDir(), "build-tools");
-        if (!jarToolsDir.exists()) jarToolsDir.mkdirs();
-
-        String[] files = context.getAssets().list("build-tools");
-        if (files != null) {
-            for (String filename : files) {
-                File targetFile = new File(jarToolsDir, filename);
-                if (targetFile.exists()) continue; 
-
-                try (InputStream in = context.getAssets().open("build-tools/" + filename);
-                     OutputStream out = new FileOutputStream(targetFile)) {
-                    byte[] buffer = new byte[4096];
-                    int read;
-                    while ((read = in.read(buffer)) != -1) {
-                        out.write(buffer, 0, read);
-                    }
-                }
-                if (!filename.endsWith(".jar") && !filename.endsWith(".keystore")) {
-                    targetFile.setExecutable(true, false);
-                }
-            }
+        if (!jarToolsDir.exists()) {
+            cb.onLog("  ✗ Critical: Build tools not found! Please restart the app.", LogLevel.ERROR);
+            throw new IOException("Build tools directory missing.");
         }
-
-        File secureBinDir = new File(context.getCodeCacheDir(), "bin");
-        if (!secureBinDir.exists()) secureBinDir.mkdirs();
-        File localAapt2 = new File(secureBinDir, "libaapt2.so");
-
-        String nativeLibDir = context.getApplicationInfo().nativeLibraryDir;
-        File systemAapt2 = new File(nativeLibDir, "libaapt2.so");
-
-        if (!systemAapt2.exists() && !localAapt2.exists()) {
-            java.util.zip.ZipFile apkZip = new java.util.zip.ZipFile(context.getApplicationInfo().sourceDir);
-            java.util.zip.ZipEntry entry = apkZip.getEntry("lib/arm64-v8a/libaapt2.so");
-            if (entry == null) entry = apkZip.getEntry("lib/armeabi-v7a/libaapt2.so");
-
-            if (entry != null) {
-                try (InputStream in = apkZip.getInputStream(entry);
-                     OutputStream out = new FileOutputStream(localAapt2)) {
-                    byte[] buffer = new byte[4096];
-                    int read;
-                    while ((read = in.read(buffer)) != -1) {
-                        out.write(buffer, 0, read);
-                    }
-                }
-                localAapt2.setExecutable(true, false);
-            }
-            apkZip.close();
-        } else if (localAapt2.exists()) {
-            localAapt2.setExecutable(true, false);
-        }
+        cb.onLog("  ✓ Internal build-tools verified successfully.", LogLevel.SUCCESS);
     }
 
-    private void buildInternal(Project project, File projectDir, BuildCallback cb, boolean isRetry) {
-        executor.execute(() -> {
-            try {
-                if (isRetry) {
-                    cb.onLog("► AI Auto-Fix applied. Re-attempting compilation…", LogLevel.INFO);
-                }
+    // ✅ AAPT2 Binary ကို Process ဖြင့် Run ခြင်း
+    private int runAapt2Binary(String[] args, BuildCallback cb) {
+        try {
+            File toolsDir = new File(context.getFilesDir(), "build-tools");
+            File aapt2Binary = new File(toolsDir, "aapt2");
 
-                cb.onProgress("Preparing build tools…", 10);
-                cb.onLog("► Preparing local build tools from assets…", LogLevel.INFO);
-                prepareLocalTools(cb);
-                
-                String nativeLibDir = context.getApplicationInfo().nativeLibraryDir;
-                File aapt2Binary = new File(nativeLibDir, "libaapt2.so"); 
-
-                if (!aapt2Binary.exists()) {
-                    aapt2Binary = new File(context.getCodeCacheDir(), "bin/libaapt2.so");
-                }
-                
-                if (!aapt2Binary.exists()) {
-                    cb.onLog("  ✗ Critical Error: libaapt2.so not found anywhere!", LogLevel.ERROR);
-                    cb.onError("Missing Native Core (libaapt2.so)");
-                    return;
-                } else {
-                    aapt2Binary.setExecutable(true, false);
-                    cb.onLog("  ✓ Found Core Binary at: " + aapt2Binary.getAbsolutePath(), LogLevel.SUCCESS);
-                }
-
-                File toolsDir      = new File(context.getFilesDir(), "build-tools");
-                File ecjJar        = new File(toolsDir, "ecj.jar");
-                File androidJar    = new File(toolsDir, "android.jar");
-                File apksignerJar  = new File(toolsDir, "apksigner.jar");
-                File debugKeystore = new File(toolsDir, "debug.keystore");
-                
-                cb.onLog("  ✓ Tools are ready in secure storage.", LogLevel.SUCCESS);
-
-                cb.onProgress("Validating XML files…", 20);
-                cb.onLog("► Checking XML layouts…", LogLevel.INFO);
-                List<String> xmlErrors = validateXmlFiles(projectDir);
-                if (!xmlErrors.isEmpty()) {
-                    for (String err : xmlErrors) cb.onLog("  ✗ " + err, LogLevel.ERROR);
-                    cb.onError("XML Validation Failed");
-                    return;
-                }
-                cb.onLog("  ✓ All XML files valid.", LogLevel.SUCCESS);
-
-                String manifestPath = new File(projectDir, "app/src/main/AndroidManifest.xml").getAbsolutePath();
-                String resPath      = new File(projectDir, "app/src/main/res").getAbsolutePath();
-                String srcPath      = new File(projectDir, "app/src/main/java").getAbsolutePath();
-                
-                String buildDir         = new File(projectDir, "app/build").getAbsolutePath();
-                String genPath          = buildDir + "/generated";
-                String objPath          = buildDir + "/obj";
-                String intermediatesRes = buildDir + "/intermediates/res";
-                String binDir           = buildDir + "/outputs/apk/release";
-
-                deleteDir(new File(buildDir));
-                new File(genPath).mkdirs();
-                new File(objPath).mkdirs();
-                new File(intermediatesRes).mkdirs();
-                new File(binDir).mkdirs();
-
-                cb.onProgress("Compiling resources…", 40);
-                cb.onLog("► [1/5] Compiling resources via AAPT2…", LogLevel.INFO);
-                
-                File rawManifestFile = new File(manifestPath);
-                String backupManifestContent = FileUtils.readFile(rawManifestFile);
-                try {
-                    String temporaryManifest = backupManifestContent.replace("<manifest", "<manifest package=\"pro.devstudio.mobile.targetapp\"");
-                    FileUtils.writeFile(rawManifestFile, temporaryManifest);
-                } catch (Exception e) {
-                    cb.onLog("  ✗ Source Manifest Modification Failed: " + e.getMessage(), LogLevel.ERROR);
-                    cb.onError("Manifest Inject Failed");
-                    return;
-                }
-
-                List<String> compileCmd = List.of(aapt2Binary.getAbsolutePath(), "compile", "--dir", resPath, "-o", intermediatesRes + "/resources.zip");
-                if (runProcess(compileCmd, projectDir, cb) != 0) { 
-                    FileUtils.writeFile(rawManifestFile, backupManifestContent);
-                    cb.onError("AAPT2 Compile Failed"); 
-                    return; 
-                }
-
-                cb.onLog("► [2/5] Linking resources and generating R.java…", LogLevel.INFO);
-                String unalignedApk = binDir + "/app-unaligned.apk";
-                
-                List<String> linkCmd = List.of(
-                    aapt2Binary.getAbsolutePath(), "link", 
-                    "-I", androidJar.getAbsolutePath(), 
-                    "--manifest", manifestPath, 
-                    "-o", unalignedApk, 
-                    "--java", genPath, 
-                    intermediatesRes + "/resources.zip"
-                );
-                int linkResult = runProcess(linkCmd, projectDir, cb);
-
-                try {
-                    FileUtils.writeFile(rawManifestFile, backupManifestContent);
-                    cb.onLog("  ✓ Source Manifest restored to clean state.", LogLevel.SUCCESS);
-                } catch (Exception e) {
-                    cb.onLog("  ⚠ Failed to restore source Manifest: " + e.getMessage(), LogLevel.WARNING);
-                }
-
-                if (linkResult != 0) { cb.onError("AAPT2 Link Failed"); return; }
-
-                cb.onProgress("Compiling Java code…", 60);
-                cb.onLog("► [3/5] Compiling Java source codes with In-App ECJ Tool…", LogLevel.INFO);
-                
-                List<String> ecjArgs = new ArrayList<>();
-                ecjArgs.add("-d"); ecjArgs.add(objPath);
-                ecjArgs.add("-cp"); ecjArgs.add(androidJar.getAbsolutePath() + File.pathSeparator + genPath);
-                ecjArgs.add("-source"); ecjArgs.add("1.7");
-                ecjArgs.add("-target"); ecjArgs.add("1.7");
-                ecjArgs.add("-proc:none");
-                ecjArgs.add("-nowarn");
-
-                addAllFiles(new File(srcPath), ".java", ecjArgs);
-                addAllFiles(new File(genPath), ".java", ecjArgs);
-                
-                boolean ecjSuccess = runJarMainInApp(ecjJar, "org.eclipse.jdt.internal.compiler.batch.Main", ecjArgs.toArray(new String[0]), cb);
-                if (!ecjSuccess) {
-                    cb.onLog("  ✗ Java Compilation Failed. Launching AI Fix…", LogLevel.ERROR);
-                    if (!isRetry && geminiClient.hasApiKey()) {
-                        triggerAiAutoFix(project, projectDir, cb);
-                    } else {
-                        cb.onError("Java Compilation Failed");
-                    }
-                    return;
-                }
-
-                // ── Step 5: DEX Conversion with D8 + R8 Fallback ──────────
-                cb.onProgress("Converting to DEX…", 80);
-                cb.onLog("► [4/5] Converting class files to DEX…", LogLevel.INFO);
-                String intermediatesDex = buildDir + "/intermediates/dex";
-                new File(intermediatesDex).mkdirs();
-
-                List<String> classFiles = new ArrayList<>();
-                addAllFiles(new File(objPath), ".class", classFiles);
-
-                if (classFiles.isEmpty()) {
-                    cb.onLog("  ✗ No class files found to convert!", LogLevel.ERROR);
-                    cb.onError("No class files to convert");
-                    return;
-                }
-
-                cb.onLog("  ℹ Converting " + classFiles.size() + " class files to DEX", LogLevel.INFO);
-
-                // ✅ D8 + R8 Fallback System
-                boolean dexSuccess = convertToDexWithFallback(toolsDir, androidJar, intermediatesDex, classFiles, cb);
-                if (!dexSuccess) { 
-                    cb.onError("DEX Conversion Failed"); 
-                    return; 
-                }
-
-                File dexFile = new File(intermediatesDex, "classes.dex");
-                if (!dexFile.exists() || dexFile.length() == 0) {
-                    cb.onLog("  ✗ classes.dex not generated or empty!", LogLevel.ERROR);
-                    cb.onError("DEX generation failed");
-                    return;
-                }
-                cb.onLog("  ✓ classes.dex generated (" + dexFile.length() + " bytes)", LogLevel.SUCCESS);
-
-                // ── Step 6: Inject DEX into APK ──────────────────────────────
-                File unalignedApkFile = new File(unalignedApk);
-                try {
-                    Map<String, String> env = new HashMap<>();
-                    env.put("create", "false");
-                    URI uri = URI.create("jar:" + unalignedApkFile.toURI());
-                    try (FileSystem fs = FileSystems.newFileSystem(uri, env)) {
-                        Path nf = fs.getPath("classes.dex");
-                        Files.copy(dexFile.toPath(), nf, StandardCopyOption.REPLACE_EXISTING);
-                    }
-                    cb.onLog("  ✓ classes.dex injected into APK successfully.", LogLevel.SUCCESS);
-                } catch (Exception e) {
-                    cb.onLog("  ✗ Failed to inject classes.dex: " + e.getMessage(), LogLevel.ERROR);
-                    cb.onError("DEX Injection Failed");
-                    return;
-                }
-
-                // ── Step 7: Sign APK ──────────────────────────────────────────
-                cb.onProgress("Signing APK…", 95);
-                cb.onLog("► [5/5] Signing APK with debug.keystore…", LogLevel.INFO);
-                File releaseApk = new File(binDir, "app-release.apk");
-
-                if (apksignerJar.exists() && debugKeystore.exists()) {
-                    String[] signArgs = {
-                        "sign",
-                        "--ks", debugKeystore.getAbsolutePath(),
-                        "--ks-pass", "pass:android",
-                        "--key-pass", "pass:android",
-                        "--out", releaseApk.getAbsolutePath(),
-                        unalignedApk
-                    };
-                    boolean signSuccess = runJarMainInApp(apksignerJar, "com.android.apksigner.ApkSignerTool", signArgs, cb);
-                    if (signSuccess) {
-                        cb.onLog("  ✓ APK Signed successfully!", LogLevel.SUCCESS);
-                    } else {
-                        cb.onLog("  ⚠ APK Sign failed, using unsigned APK.", LogLevel.WARNING);
-                        unalignedApkFile.renameTo(releaseApk);
-                    }
-                } else {
-                    cb.onLog("  ⚠ Signing tools not found, using unsigned APK.", LogLevel.WARNING);
-                    unalignedApkFile.renameTo(releaseApk);
-                }
-
-                File cacheDir = new File(context.getCacheDir(), "builds");
-                cacheDir.mkdirs();
-                File zipOut = new File(cacheDir, project.dirName() + ".zip");
-                FileUtils.zipDirectory(projectDir, zipOut);
-
-                cb.onProgress("Done.", 100);
-                cb.onLog("━━━━━━━━━━━━━━━━━━━━━━━━", LogLevel.INFO);
-                cb.onLog("✓ Build complete — Standalone App Ready!", LogLevel.SUCCESS);
-                cb.onLog("✓ APK: " + releaseApk.getAbsolutePath(), LogLevel.SUCCESS);
-                cb.onSuccess(zipOut, releaseApk);
-
-            } catch (Exception e) {
-                cb.onLog("✗ Build error: " + e.getMessage(), LogLevel.ERROR);
-                cb.onError(e.getMessage());
+            if (!aapt2Binary.exists()) {
+                cb.onLog("  ✗ Critical: aapt2 missing in internal build-tools!", LogLevel.ERROR);
+                return -1;
             }
-        });
+
+            aapt2Binary.setExecutable(true, false);
+
+            List<String> command = new ArrayList<>();
+            command.add(aapt2Binary.getAbsolutePath());
+            for (String arg : args) {
+                command.add(arg);
+            }
+
+            ProcessBuilder pb = new ProcessBuilder(command);
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    cb.onLog("  [AAPT2] " + line, LogLevel.INFO);
+                }
+            }
+
+            return process.waitFor();
+        } catch (Exception e) {
+            cb.onLog("  ✗ AAPT2 Exec Engine Exception: " + e.getMessage(), LogLevel.ERROR);
+            return -1;
+        }
     }
 
     // ✅ D8 + R8 Fallback System
     private boolean convertToDexWithFallback(File toolsDir, File androidJar, String intermediatesDex, 
                                                List<String> classFiles, BuildCallback cb) {
         
-        // စမ်းကြည့်မယ့် JAR ဖိုင်တွေ
         String[] jarFiles = {"d8.jar", "r8.jar"};
         String[] classNames = {
             "com.android.tools.r8.D8",
-            "com.android.tools.r8.R8",
-            "com.android.tools.r8.D8Command"
+            "com.android.tools.r8.R8"
         };
         
         for (String jarFile : jarFiles) {
@@ -497,7 +266,7 @@ public class BuildManager {
                 jarFile.getAbsolutePath(),
                 optimizedDir.getAbsolutePath(),
                 jarFile.getParent(),
-                ClassLoader.getSystemClassLoader()
+                context.getClassLoader()
             );
 
             Class<?> mainClass = classLoader.loadClass(mainClassName);
@@ -533,6 +302,207 @@ public class BuildManager {
         }
     }
 
+    private void buildInternal(Project project, File projectDir, BuildCallback cb, boolean isRetry) {
+        executor.execute(() -> {
+            try {
+                if (isRetry) {
+                    cb.onLog("► AI Auto-Fix applied. Re-attempting compilation…", LogLevel.INFO);
+                }
+
+                cb.onProgress("Preparing build tools…", 10);
+                cb.onLog("► Verifying internal build tools…", LogLevel.INFO);
+                prepareLocalTools(cb);
+
+                File toolsDir      = new File(context.getFilesDir(), "build-tools");
+                File ecjJar        = new File(toolsDir, "ecj.jar");
+                File androidJar    = new File(toolsDir, "android.jar");
+                File apksignerJar  = new File(toolsDir, "apksigner.jar");
+                File debugKeystore = new File(toolsDir, "debug.keystore");
+                
+                cb.onLog("  ✓ Tools are ready in secure storage.", LogLevel.SUCCESS);
+
+                cb.onProgress("Validating XML files…", 20);
+                cb.onLog("► Checking XML layouts…", LogLevel.INFO);
+                List<String> xmlErrors = validateXmlFiles(projectDir);
+                if (!xmlErrors.isEmpty()) {
+                    for (String err : xmlErrors) cb.onLog("  ✗ " + err, LogLevel.ERROR);
+                    cb.onError("XML Validation Failed");
+                    return;
+                }
+                cb.onLog("  ✓ All XML files valid.", LogLevel.SUCCESS);
+
+                String manifestPath = new File(projectDir, "app/src/main/AndroidManifest.xml").getAbsolutePath();
+                String resPath      = new File(projectDir, "app/src/main/res").getAbsolutePath();
+                String srcPath      = new File(projectDir, "app/src/main/java").getAbsolutePath();
+                
+                String buildDir         = new File(projectDir, "app/build").getAbsolutePath();
+                String genPath          = buildDir + "/generated";
+                String objPath          = buildDir + "/obj";
+                String intermediatesRes = buildDir + "/intermediates/res";
+                String binDir           = buildDir + "/outputs/apk/release";
+
+                deleteDir(new File(buildDir));
+                new File(genPath).mkdirs();
+                new File(objPath).mkdirs();
+                new File(intermediatesRes).mkdirs();
+                new File(binDir).mkdirs();
+
+                // ── Step 1: AAPT2 Compile ────────────────────────────────────
+                cb.onProgress("Compiling resources…", 40);
+                cb.onLog("► [1/5] Compiling resources via AAPT2 Binary Executable…", LogLevel.INFO);
+
+                String[] compileArgs = {
+                    "compile",
+                    "--dir", resPath,
+                    "-o", intermediatesRes + "/resources.zip"
+                };
+                
+                int compileResult = runAapt2Binary(compileArgs, cb);
+                if (compileResult != 0) { 
+                    cb.onError("AAPT2 Compile Process failed with exit code: " + compileResult); 
+                    return; 
+                }
+                cb.onLog("  ✓ Resources compiled safely.", LogLevel.SUCCESS);
+
+                // ── Step 2: AAPT2 Link ──────────────────────────────────────
+                cb.onLog("► [2/5] Linking resources and generating R.java…", LogLevel.INFO);
+                String unalignedApk = binDir + "/app-unaligned.apk";
+                
+                String[] linkArgs = {
+                    "link", 
+                    "-I", androidJar.getAbsolutePath(), 
+                    "--manifest", manifestPath, 
+                    "-o", unalignedApk, 
+                    "--java", genPath, 
+                    intermediatesRes + "/resources.zip"
+                };
+                
+                int linkResult = runAapt2Binary(linkArgs, cb);
+                if (linkResult != 0) { 
+                    cb.onError("AAPT2 Link Process failed with exit code: " + linkResult); 
+                    return; 
+                }
+                cb.onLog("  ✓ Resources linked safely.", LogLevel.SUCCESS);
+
+                // ── Step 3: Java Compilation ─────────────────────────────────
+                cb.onProgress("Compiling Java code…", 60);
+                cb.onLog("► [3/5] Compiling Java source codes with In-App ECJ Tool…", LogLevel.INFO);
+                
+                List<String> ecjArgs = new ArrayList<>();
+                ecjArgs.add("-d"); ecjArgs.add(objPath);
+                ecjArgs.add("-cp"); ecjArgs.add(androidJar.getAbsolutePath() + File.pathSeparator + genPath);
+                ecjArgs.add("-source"); ecjArgs.add("1.7");
+                ecjArgs.add("-target"); ecjArgs.add("1.7");
+                ecjArgs.add("-proc:none");
+                ecjArgs.add("-nowarn");
+
+                addAllFiles(new File(srcPath), ".java", ecjArgs);
+                addAllFiles(new File(genPath), ".java", ecjArgs);
+                
+                boolean ecjSuccess = runJarMainInApp(ecjJar, "org.eclipse.jdt.internal.compiler.batch.Main", ecjArgs.toArray(new String[0]), cb);
+                if (!ecjSuccess) {
+                    cb.onLog("  ✗ Java Compilation Failed. Launching AI Fix…", LogLevel.ERROR);
+                    if (!isRetry && geminiClient.hasApiKey()) {
+                        triggerAiAutoFix(project, projectDir, cb);
+                    } else {
+                        cb.onError("Java Compilation Failed");
+                    }
+                    return;
+                }
+
+                // ── Step 4: DEX Conversion with D8 + R8 Fallback ──────────
+                cb.onProgress("Converting to DEX…", 80);
+                cb.onLog("► [4/5] Converting class files to DEX via D8/R8…", LogLevel.INFO);
+                String intermediatesDex = buildDir + "/intermediates/dex";
+                new File(intermediatesDex).mkdirs();
+
+                List<String> classFiles = new ArrayList<>();
+                addAllFiles(new File(objPath), ".class", classFiles);
+
+                if (classFiles.isEmpty()) {
+                    cb.onLog("  ✗ No class files found to convert!", LogLevel.ERROR);
+                    cb.onError("No class files to convert");
+                    return;
+                }
+
+                cb.onLog("  ℹ Converting " + classFiles.size() + " class files to DEX", LogLevel.INFO);
+
+                // ✅ D8 + R8 Fallback System
+                boolean dexSuccess = convertToDexWithFallback(toolsDir, androidJar, intermediatesDex, classFiles, cb);
+                if (!dexSuccess) { 
+                    cb.onError("DEX Conversion Failed"); 
+                    return; 
+                }
+
+                File dexFile = new File(intermediatesDex, "classes.dex");
+                if (!dexFile.exists() || dexFile.length() == 0) {
+                    cb.onLog("  ✗ classes.dex not generated or empty!", LogLevel.ERROR);
+                    cb.onError("DEX generation failed");
+                    return;
+                }
+                cb.onLog("  ✓ classes.dex generated (" + dexFile.length() + " bytes)", LogLevel.SUCCESS);
+
+                // ── Step 5: Inject DEX into APK ──────────────────────────────
+                File unalignedApkFile = new File(unalignedApk);
+                try {
+                    Map<String, String> env = new HashMap<>();
+                    env.put("create", "false");
+                    URI uri = URI.create("jar:" + unalignedApkFile.toURI());
+                    try (FileSystem fs = FileSystems.newFileSystem(uri, env)) {
+                        Path nf = fs.getPath("classes.dex");
+                        Files.copy(dexFile.toPath(), nf, StandardCopyOption.REPLACE_EXISTING);
+                    }
+                    cb.onLog("  ✓ classes.dex injected into APK successfully.", LogLevel.SUCCESS);
+                } catch (Exception e) {
+                    cb.onLog("  ✗ Failed to inject classes.dex: " + e.getMessage(), LogLevel.ERROR);
+                    cb.onError("DEX Injection Failed");
+                    return;
+                }
+
+                // ── Step 6: Sign APK ──────────────────────────────────────────
+                cb.onProgress("Signing APK…", 95);
+                cb.onLog("► [5/5] Signing APK with debug.keystore…", LogLevel.INFO);
+                File releaseApk = new File(binDir, "app-release.apk");
+
+                if (apksignerJar.exists() && debugKeystore.exists()) {
+                    String[] signArgs = {
+                        "sign",
+                        "--ks", debugKeystore.getAbsolutePath(),
+                        "--ks-pass", "pass:android",
+                        "--key-pass", "pass:android",
+                        "--out", releaseApk.getAbsolutePath(),
+                        unalignedApk
+                    };
+                    boolean signSuccess = runJarMainInApp(apksignerJar, "com.android.apksigner.ApkSignerTool", signArgs, cb);
+                    if (signSuccess) {
+                        cb.onLog("  ✓ APK Signed successfully!", LogLevel.SUCCESS);
+                    } else {
+                        cb.onLog("  ⚠ APK Sign failed, using unsigned APK.", LogLevel.WARNING);
+                        unalignedApkFile.renameTo(releaseApk);
+                    }
+                } else {
+                    cb.onLog("  ⚠ Signing tools not found, using unsigned APK.", LogLevel.WARNING);
+                    unalignedApkFile.renameTo(releaseApk);
+                }
+
+                File cacheDir = new File(context.getCacheDir(), "builds");
+                cacheDir.mkdirs();
+                File zipOut = new File(cacheDir, project.dirName() + ".zip");
+                FileUtils.zipDirectory(projectDir, zipOut);
+
+                cb.onProgress("Done.", 100);
+                cb.onLog("━━━━━━━━━━━━━━━━━━━━━━━━", LogLevel.INFO);
+                cb.onLog("✓ Build complete — Standalone App Ready!", LogLevel.SUCCESS);
+                cb.onLog("✓ APK: " + releaseApk.getAbsolutePath(), LogLevel.SUCCESS);
+                cb.onSuccess(zipOut, releaseApk);
+
+            } catch (Exception e) {
+                cb.onLog("✗ Build error: " + e.getMessage(), LogLevel.ERROR);
+                cb.onError(e.getMessage());
+            }
+        });
+    }
+
     private boolean runJarMainInApp(File jarFile, String mainClassName, String[] args, BuildCallback cb) {
         try {
             File optimizedDir = new File(context.getCacheDir(), "dex-opt");
@@ -541,8 +511,8 @@ public class BuildManager {
             DexClassLoader classLoader = new DexClassLoader(
                 jarFile.getAbsolutePath(),
                 optimizedDir.getAbsolutePath(),
-                null,
-                ClassLoader.getSystemClassLoader()
+                jarFile.getParent(),
+                context.getClassLoader()
             );
 
             java.io.StringWriter outWriter = new java.io.StringWriter();
@@ -655,31 +625,6 @@ public class BuildManager {
         }
     }
 
-    private int runProcess(List<String> command, File workingDir, BuildCallback cb) throws Exception {
-        ProcessBuilder pb = new ProcessBuilder(command);
-        pb.directory(workingDir);
-        pb.redirectErrorStream(true);
-        
-        Map<String, String> env = pb.environment();
-        String nativeLibDir = context.getApplicationInfo().nativeLibraryDir;
-        
-        String systemLdPath = env.get("LD_LIBRARY_PATH");
-        if (systemLdPath != null && !systemLdPath.isBlank()) {
-            env.put("LD_LIBRARY_PATH", nativeLibDir + ":" + systemLdPath);
-        } else {
-            env.put("LD_LIBRARY_PATH", nativeLibDir + ":/system/lib64:/system/lib");
-        }
-
-        Process process = pb.start();
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                cb.onLog(line, LogLevel.INFO);
-            }
-        }
-        return process.waitFor();
-    }
-
     private void addAllFiles(File dir, String extension, List<String> list) {
         if (!dir.exists()) return;
         File[] files = dir.listFiles();
@@ -745,4 +690,4 @@ public class BuildManager {
         }
         f.delete();
     }
-}
+            }
