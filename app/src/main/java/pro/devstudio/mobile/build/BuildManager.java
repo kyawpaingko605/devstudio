@@ -98,7 +98,7 @@ public class BuildManager {
                 "        setContentView(layoutId);\n\n" +
                 "        int tvId = getResources().getIdentifier(\"tv_title\", \"id\", getPackageName());\n" +
                 "        int btnId = getResources().getIdentifier(\"btn_click\", \"id\", getPackageName());\n" +
-                "        TextView tv = findViewById(tvId);\n" +
+                "        final TextView tv = findViewById(tvId);\n" +
                 "        Button btn = findViewById(btnId);\n\n" +
                 "        if (btn != null && tv != null) {\n" +
                 "            btn.setOnClickListener(new android.view.View.OnClickListener() {\n" +
@@ -166,16 +166,57 @@ public class BuildManager {
         buildInternal(project, projectDir, cb, false);
     }
 
-    // ✅ ပြင်ဆင်ချက်- MainActivity က assets ကနေ ဖြည်ချပေးထားတဲ့ Internal Storage လမ်းကြောင်းကို တိုက်ရိုက် ညွှန်ပြခြင်း
     private void prepareLocalTools(BuildCallback cb) throws IOException {
         File jarToolsDir = new File(context.getFilesDir(), "build-tools");
-        
-        if (!jarToolsDir.exists()) {
-            cb.onLog("  ✗ Critical: Build tools not found! Please restart the app.", LogLevel.ERROR);
-            throw new IOException("Build tools directory missing.");
+        if (!jarToolsDir.exists()) jarToolsDir.mkdirs();
+
+        String[] files = context.getAssets().list("build-tools");
+        if (files != null) {
+            for (String filename : files) {
+                File targetFile = new File(jarToolsDir, filename);
+                if (targetFile.exists()) continue; 
+
+                try (InputStream in = context.getAssets().open("build-tools/" + filename);
+                     OutputStream out = new FileOutputStream(targetFile)) {
+                    byte[] buffer = new byte[4096];
+                    int read;
+                    while ((read = in.read(buffer)) != -1) {
+                        out.write(buffer, 0, read);
+                    }
+                }
+                if (!filename.endsWith(".jar") && !filename.endsWith(".keystore")) {
+                    targetFile.setExecutable(true, false);
+                }
+            }
         }
 
-        cb.onLog("  ✓ Internal build-tools verified successfully.", LogLevel.SUCCESS);
+        File secureBinDir = new File(context.getCodeCacheDir(), "bin");
+        if (!secureBinDir.exists()) secureBinDir.mkdirs();
+        File localAapt2 = new File(secureBinDir, "libaapt2.so");
+
+        String nativeLibDir = context.getApplicationInfo().nativeLibraryDir;
+        File systemAapt2 = new File(nativeLibDir, "libaapt2.so");
+
+        if (!systemAapt2.exists() && !localAapt2.exists()) {
+            java.util.zip.ZipFile apkZip = new java.util.zip.ZipFile(context.getApplicationInfo().sourceDir);
+            java.util.zip.ZipEntry entry = apkZip.getEntry("lib/arm64-v8a/libaapt2.so");
+            if (entry == null) entry = apkZip.getEntry("lib/armeabi-v7a/libaapt2.so");
+
+            if (entry != null) {
+                try (InputStream in = apkZip.getInputStream(entry);
+                     OutputStream out = new FileOutputStream(localAapt2)) {
+                    byte[] buffer = new byte[4096];
+                    int read;
+                    while ((read = in.read(buffer)) != -1) {
+                        out.write(buffer, 0, read);
+                    }
+                }
+                localAapt2.setExecutable(true, false);
+            }
+            apkZip.close();
+        } else if (localAapt2.exists()) {
+            localAapt2.setExecutable(true, false);
+        }
     }
 
     private void buildInternal(Project project, File projectDir, BuildCallback cb, boolean isRetry) {
@@ -186,21 +227,30 @@ public class BuildManager {
                 }
 
                 cb.onProgress("Preparing build tools…", 10);
-                cb.onLog("► Verifying internal build tools…", LogLevel.INFO);
+                cb.onLog("► Preparing local build tools from assets…", LogLevel.INFO);
                 prepareLocalTools(cb);
+                
+                String nativeLibDir = context.getApplicationInfo().nativeLibraryDir;
+                File aapt2Binary = new File(nativeLibDir, "libaapt2.so"); 
+
+                if (!aapt2Binary.exists()) {
+                    aapt2Binary = new File(context.getCodeCacheDir(), "bin/libaapt2.so");
+                }
+                
+                if (!aapt2Binary.exists()) {
+                    cb.onLog("  ✗ Critical Error: libaapt2.so not found anywhere!", LogLevel.ERROR);
+                    cb.onError("Missing Native Core (libaapt2.so)");
+                    return;
+                } else {
+                    aapt2Binary.setExecutable(true, false);
+                    cb.onLog("  ✓ Found Core Binary at: " + aapt2Binary.getAbsolutePath(), LogLevel.SUCCESS);
+                }
 
                 File toolsDir      = new File(context.getFilesDir(), "build-tools");
                 File ecjJar        = new File(toolsDir, "ecj.jar");
-                File d8Jar         = new File(toolsDir, "d8.jar");
                 File androidJar    = new File(toolsDir, "android.jar");
                 File apksignerJar  = new File(toolsDir, "apksigner.jar");
                 File debugKeystore = new File(toolsDir, "debug.keystore");
-                
-                if (!d8Jar.exists()) {
-                    cb.onLog("  ✗ d8.jar not found! Please check internal storage.", LogLevel.ERROR);
-                    cb.onError("d8.jar missing - required for DEX conversion");
-                    return;
-                }
                 
                 cb.onLog("  ✓ Tools are ready in secure storage.", LogLevel.SUCCESS);
 
@@ -231,27 +281,47 @@ public class BuildManager {
                 new File(binDir).mkdirs();
 
                 cb.onProgress("Compiling resources…", 40);
-                cb.onLog("► [1/5] Compiling resources via AAPT2 (JNI Bridge)…", LogLevel.INFO);
+                cb.onLog("► [1/5] Compiling resources via AAPT2…", LogLevel.INFO);
+                
+                File rawManifestFile = new File(manifestPath);
+                String backupManifestContent = FileUtils.readFile(rawManifestFile);
+                try {
+                    String temporaryManifest = backupManifestContent.replace("<manifest", "<manifest package=\"pro.devstudio.mobile.targetapp\"");
+                    FileUtils.writeFile(rawManifestFile, temporaryManifest);
+                } catch (Exception e) {
+                    cb.onLog("  ✗ Source Manifest Modification Failed: " + e.getMessage(), LogLevel.ERROR);
+                    cb.onError("Manifest Inject Failed");
+                    return;
+                }
 
-                String[] compileArgs = {"compile", "--dir", resPath, "-o", intermediatesRes + "/resources.zip"};
-                if (Aapt2.execute(compileArgs) != 0) { 
-                    cb.onError("AAPT2 Compile Failed via JNI"); 
+                List<String> compileCmd = List.of(aapt2Binary.getAbsolutePath(), "compile", "--dir", resPath, "-o", intermediatesRes + "/resources.zip");
+                if (runProcess(compileCmd, projectDir, cb) != 0) { 
+                    FileUtils.writeFile(rawManifestFile, backupManifestContent);
+                    cb.onError("AAPT2 Compile Failed"); 
                     return; 
                 }
 
                 cb.onLog("► [2/5] Linking resources and generating R.java…", LogLevel.INFO);
                 String unalignedApk = binDir + "/app-unaligned.apk";
                 
-                String[] linkArgs = {
-                    "link", 
+                List<String> linkCmd = List.of(
+                    aapt2Binary.getAbsolutePath(), "link", 
                     "-I", androidJar.getAbsolutePath(), 
                     "--manifest", manifestPath, 
                     "-o", unalignedApk, 
                     "--java", genPath, 
                     intermediatesRes + "/resources.zip"
-                };
-                int linkResult = Aapt2.execute(linkArgs);
-                if (linkResult != 0) { cb.onError("AAPT2 Link Failed via JNI"); return; }
+                );
+                int linkResult = runProcess(linkCmd, projectDir, cb);
+
+                try {
+                    FileUtils.writeFile(rawManifestFile, backupManifestContent);
+                    cb.onLog("  ✓ Source Manifest restored to clean state.", LogLevel.SUCCESS);
+                } catch (Exception e) {
+                    cb.onLog("  ⚠ Failed to restore source Manifest: " + e.getMessage(), LogLevel.WARNING);
+                }
+
+                if (linkResult != 0) { cb.onError("AAPT2 Link Failed"); return; }
 
                 cb.onProgress("Compiling Java code…", 60);
                 cb.onLog("► [3/5] Compiling Java source codes with In-App ECJ Tool…", LogLevel.INFO);
@@ -259,9 +329,8 @@ public class BuildManager {
                 List<String> ecjArgs = new ArrayList<>();
                 ecjArgs.add("-d"); ecjArgs.add(objPath);
                 ecjArgs.add("-cp"); ecjArgs.add(androidJar.getAbsolutePath() + File.pathSeparator + genPath);
-                
-                ecjArgs.add("-source"); ecjArgs.add("1.8");
-                ecjArgs.add("-target"); ecjArgs.add("1.8");
+                ecjArgs.add("-source"); ecjArgs.add("1.7");
+                ecjArgs.add("-target"); ecjArgs.add("1.7");
                 ecjArgs.add("-proc:none");
                 ecjArgs.add("-nowarn");
 
@@ -279,19 +348,11 @@ public class BuildManager {
                     return;
                 }
 
-                // ── Step 5: DEX Conversion with D8 (Using D8Command) ──────
+                // ── Step 5: DEX Conversion with D8 + R8 Fallback ──────────
                 cb.onProgress("Converting to DEX…", 80);
-                cb.onLog("► [4/5] Converting class files to DEX via D8…", LogLevel.INFO);
+                cb.onLog("► [4/5] Converting class files to DEX…", LogLevel.INFO);
                 String intermediatesDex = buildDir + "/intermediates/dex";
                 new File(intermediatesDex).mkdirs();
-
-                List<String> d8Args = new ArrayList<>();
-                d8Args.add("--lib");
-                d8Args.add(androidJar.getAbsolutePath());
-                d8Args.add("--output");
-                d8Args.add(intermediatesDex);
-                d8Args.add("--min-api");
-                d8Args.add("21");
 
                 List<String> classFiles = new ArrayList<>();
                 addAllFiles(new File(objPath), ".class", classFiles);
@@ -302,11 +363,11 @@ public class BuildManager {
                     return;
                 }
 
-                d8Args.addAll(classFiles);
                 cb.onLog("  ℹ Converting " + classFiles.size() + " class files to DEX", LogLevel.INFO);
 
-                boolean d8Success = runD8WithCommand(d8Jar, d8Args, cb);
-                if (!d8Success) { 
+                // ✅ D8 + R8 Fallback System
+                boolean dexSuccess = convertToDexWithFallback(toolsDir, androidJar, intermediatesDex, classFiles, cb);
+                if (!dexSuccess) { 
                     cb.onError("DEX Conversion Failed"); 
                     return; 
                 }
@@ -380,39 +441,94 @@ public class BuildManager {
         });
     }
 
-    private boolean runD8WithCommand(File d8Jar, List<String> args, BuildCallback cb) {
+    // ✅ D8 + R8 Fallback System
+    private boolean convertToDexWithFallback(File toolsDir, File androidJar, String intermediatesDex, 
+                                               List<String> classFiles, BuildCallback cb) {
+        
+        // စမ်းကြည့်မယ့် JAR ဖိုင်တွေ
+        String[] jarFiles = {"d8.jar", "r8.jar"};
+        String[] classNames = {
+            "com.android.tools.r8.D8",
+            "com.android.tools.r8.R8",
+            "com.android.tools.r8.D8Command"
+        };
+        
+        for (String jarFile : jarFiles) {
+            File jar = new File(toolsDir, jarFile);
+            if (!jar.exists()) {
+                cb.onLog("  ⚠ " + jarFile + " not found, trying next...", LogLevel.WARNING);
+                continue;
+            }
+            
+            cb.onLog("  ℹ Trying " + jarFile + "...", LogLevel.INFO);
+            
+            for (String className : classNames) {
+                try {
+                    List<String> d8Args = new ArrayList<>();
+                    d8Args.add("--lib");
+                    d8Args.add(androidJar.getAbsolutePath());
+                    d8Args.add("--output");
+                    d8Args.add(intermediatesDex);
+                    d8Args.add("--min-api");
+                    d8Args.add("21");
+                    d8Args.addAll(classFiles);
+                    
+                    boolean success = runDexTool(jar, className, d8Args, cb);
+                    if (success) {
+                        cb.onLog("  ✓ DEX conversion successful with " + jarFile + " (" + className + ")", LogLevel.SUCCESS);
+                        return true;
+                    }
+                } catch (Exception e) {
+                    cb.onLog("  ⚠ " + className + " failed: " + e.getMessage(), LogLevel.WARNING);
+                }
+            }
+        }
+        
+        cb.onLog("  ✗ All DEX tools failed!", LogLevel.ERROR);
+        return false;
+    }
+
+    private boolean runDexTool(File jarFile, String mainClassName, List<String> args, BuildCallback cb) {
         try {
             File optimizedDir = new File(context.getCacheDir(), "dex-opt");
             if (!optimizedDir.exists()) optimizedDir.mkdirs();
 
             DexClassLoader classLoader = new DexClassLoader(
-                d8Jar.getAbsolutePath(),
+                jarFile.getAbsolutePath(),
                 optimizedDir.getAbsolutePath(),
-                null,
-                context.getClassLoader()
+                jarFile.getParent(),
+                ClassLoader.getSystemClassLoader()
             );
 
-            Class<?> d8Class = classLoader.loadClass("com.android.tools.r8.D8");
-            Class<?> d8CommandClass = classLoader.loadClass("com.android.tools.r8.D8Command");
-            Class<?> builderClass = classLoader.loadClass("com.android.tools.r8.D8Command$Builder");
+            Class<?> mainClass = classLoader.loadClass(mainClassName);
+            Method mainMethod = mainClass.getMethod("main", String[].class);
             
-            Method parseMethod = d8CommandClass.getMethod("parse", String[].class);
-            Method buildMethod = builderClass.getMethod("build");
+            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+            java.io.PrintStream customPS = new java.io.PrintStream(baos);
+            java.io.PrintStream originalOut = System.out;
+            java.io.PrintStream originalErr = System.err;
             
-            Object builder = parseMethod.invoke(null, (Object) args.toArray(new String[0]));
-            Object command = buildMethod.invoke(builder);
+            System.setOut(customPS);
+            System.setErr(customPS);
             
-            Method runMethod = d8Class.getMethod("run", d8CommandClass);
-            runMethod.invoke(null, command);
+            try {
+                mainMethod.invoke(null, (Object) args.toArray(new String[0]));
+                String logOutput = baos.toString();
+                if (!logOutput.isBlank()) {
+                    cb.onLog(logOutput, LogLevel.INFO);
+                }
+                return true;
+            } catch (java.lang.reflect.InvocationTargetException e) {
+                Throwable cause = e.getCause();
+                cb.onLog("  ✗ " + mainClassName + " error: " + (cause != null ? cause.getMessage() : e.getMessage()), LogLevel.ERROR);
+                return false;
+            } finally {
+                System.setOut(originalOut);
+                System.setErr(originalErr);
+            }
             
-            return true;
-            
-        } catch (java.lang.reflect.InvocationTargetException e) {
-            Throwable cause = e.getCause();
-            cb.onLog("  ✗ D8 Error: " + (cause != null ? cause.getMessage() : e.getMessage()), LogLevel.ERROR);
-            return false;
         } catch (Exception e) {
-            cb.onLog("  ✗ D8 Reflection Error: " + e.getMessage(), LogLevel.ERROR);
+            cb.onLog("  ✗ " + mainClassName + " reflection error: " + e.getMessage(), LogLevel.ERROR);
             return false;
         }
     }
@@ -426,7 +542,7 @@ public class BuildManager {
                 jarFile.getAbsolutePath(),
                 optimizedDir.getAbsolutePath(),
                 null,
-                context.getClassLoader()
+                ClassLoader.getSystemClassLoader()
             );
 
             java.io.StringWriter outWriter = new java.io.StringWriter();
@@ -537,6 +653,31 @@ public class BuildManager {
         } catch (Exception e) {
             cb.onLog("  ✗ Error reading code file for AI: " + e.getMessage(), LogLevel.ERROR);
         }
+    }
+
+    private int runProcess(List<String> command, File workingDir, BuildCallback cb) throws Exception {
+        ProcessBuilder pb = new ProcessBuilder(command);
+        pb.directory(workingDir);
+        pb.redirectErrorStream(true);
+        
+        Map<String, String> env = pb.environment();
+        String nativeLibDir = context.getApplicationInfo().nativeLibraryDir;
+        
+        String systemLdPath = env.get("LD_LIBRARY_PATH");
+        if (systemLdPath != null && !systemLdPath.isBlank()) {
+            env.put("LD_LIBRARY_PATH", nativeLibDir + ":" + systemLdPath);
+        } else {
+            env.put("LD_LIBRARY_PATH", nativeLibDir + ":/system/lib64:/system/lib");
+        }
+
+        Process process = pb.start();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                cb.onLog(line, LogLevel.INFO);
+            }
+        }
+        return process.waitFor();
     }
 
     private void addAllFiles(File dir, String extension, List<String> list) {
