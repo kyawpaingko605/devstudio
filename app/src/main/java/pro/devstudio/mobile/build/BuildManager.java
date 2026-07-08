@@ -175,7 +175,7 @@ public class BuildManager {
         cb.onLog("  ✓ Internal build-tools verified successfully.", LogLevel.SUCCESS);
     }
 
-    // ✅ AAPT2 Binary ကို Process ဖြင့် Run ခြင်း
+    // ✅ No-root အတွက် AAPT2 Binary ကို Process ဖြင့် Run ခြင်း
     private int runAapt2Binary(String[] args, BuildCallback cb) {
         try {
             File toolsDir = new File(context.getFilesDir(), "build-tools");
@@ -186,13 +186,30 @@ public class BuildManager {
                 return -1;
             }
 
-            aapt2Binary.setExecutable(true, false);
+            // ✅ No-root အတွက် Java နဲ့ Permission ပေးပါ
+            if (!aapt2Binary.canExecute()) {
+                cb.onLog("  ℹ Setting execute permission for aapt2...", LogLevel.INFO);
+                boolean setExecutable = aapt2Binary.setExecutable(true, false);
+                if (setExecutable) {
+                    cb.onLog("  ✓ Execute permission set successfully via Java.", LogLevel.SUCCESS);
+                } else {
+                    cb.onLog("  ⚠ Java setExecutable returned false, but continuing...", LogLevel.WARNING);
+                }
+            }
 
+            // ✅ ပြန်စစ်ပါ (No-root မှာ canExecute() က false ပြန်နိုင်တယ်)
+            if (!aapt2Binary.canExecute()) {
+                cb.onLog("  ℹ Note: canExecute() returned false, but trying to run anyway (No-root).", LogLevel.INFO);
+            }
+
+            // ✅ aapt2 ကို Process နဲ့ Run ပါ
             List<String> command = new ArrayList<>();
             command.add(aapt2Binary.getAbsolutePath());
             for (String arg : args) {
                 command.add(arg);
             }
+
+            cb.onLog("  ℹ Running: " + String.join(" ", command), LogLevel.INFO);
 
             ProcessBuilder pb = new ProcessBuilder(command);
             pb.redirectErrorStream(true);
@@ -205,14 +222,20 @@ public class BuildManager {
                 }
             }
 
-            return process.waitFor();
+            int exitCode = process.waitFor();
+            cb.onLog("  ℹ AAPT2 exit code: " + exitCode, LogLevel.INFO);
+            return exitCode;
+
+        } catch (IOException e) {
+            cb.onLog("  ✗ AAPT2 IOException: " + e.getMessage(), LogLevel.ERROR);
+            return -1;
         } catch (Exception e) {
             cb.onLog("  ✗ AAPT2 Exec Engine Exception: " + e.getMessage(), LogLevel.ERROR);
             return -1;
         }
     }
 
-    // ✅ D8 + R8 Fallback System
+    // ✅ D8 + R8 Fallback System (No-root အတွက်)
     private boolean convertToDexWithFallback(File toolsDir, File androidJar, String intermediatesDex, 
                                                List<String> classFiles, BuildCallback cb) {
         
@@ -349,7 +372,7 @@ public class BuildManager {
 
                 // ── Step 1: AAPT2 Compile ────────────────────────────────────
                 cb.onProgress("Compiling resources…", 40);
-                cb.onLog("► [1/5] Compiling resources via AAPT2 Binary Executable…", LogLevel.INFO);
+                cb.onLog("► [1/5] Compiling resources via AAPT2...", LogLevel.INFO);
 
                 String[] compileArgs = {
                     "compile",
@@ -427,7 +450,6 @@ public class BuildManager {
 
                 cb.onLog("  ℹ Converting " + classFiles.size() + " class files to DEX", LogLevel.INFO);
 
-                // ✅ D8 + R8 Fallback System
                 boolean dexSuccess = convertToDexWithFallback(toolsDir, androidJar, intermediatesDex, classFiles, cb);
                 if (!dexSuccess) { 
                     cb.onError("DEX Conversion Failed"); 
