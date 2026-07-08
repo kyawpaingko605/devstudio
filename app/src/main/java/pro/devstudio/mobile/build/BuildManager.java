@@ -6,6 +6,7 @@ import org.xmlpull.v1.XmlPullParserFactory;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -172,18 +173,10 @@ public class BuildManager {
             cb.onLog("  ✗ Critical: Build tools not found! Please restart the app.", LogLevel.ERROR);
             throw new IOException("Build tools directory missing.");
         }
-        
-        // ✅ Oppo A17 အတွက် aapt2 permission ကိုစစ်ပါ
-        File aapt2 = new File(jarToolsDir, "aapt2");
-        if (aapt2.exists() && !aapt2.canExecute()) {
-            cb.onLog("  ℹ Setting execute permission for aapt2...", LogLevel.INFO);
-            aapt2.setExecutable(true, false);
-        }
-        
         cb.onLog("  ✓ Internal build-tools verified successfully.", LogLevel.SUCCESS);
     }
 
-    // ✅ Oppo A17 No-root အတွက် AAPT2 Process
+    // ✅ No-root အတွက် aapt2 Process (cache ထဲ copy လုပ်ပြီး permission ပေးတယ်)
     private int runAapt2Binary(String[] args, BuildCallback cb) {
         try {
             File toolsDir = new File(context.getFilesDir(), "build-tools");
@@ -194,33 +187,38 @@ public class BuildManager {
                 return -1;
             }
 
-            // ✅ Oppo A17 အတွက် execute permission စစ်ပါ
-            if (!aapt2Binary.canExecute()) {
-                cb.onLog("  ℹ Setting execute permission for aapt2 (Oppo A17)...", LogLevel.INFO);
-                boolean success = aapt2Binary.setExecutable(true, false);
-                if (success) {
-                    cb.onLog("  ✓ Execute permission set successfully.", LogLevel.SUCCESS);
-                } else {
-                    cb.onLog("  ⚠ setExecutable returned false, trying alternative...", LogLevel.WARNING);
+            // ✅ aapt2 ကို cache ထဲ ကူးပြီး permission ပေးပါ (No-root အတွက်)
+            File aapt2Cache = new File(context.getCacheDir(), "aapt2");
+            if (!aapt2Cache.exists() || aapt2Cache.length() != aapt2Binary.length()) {
+                cb.onLog("  ℹ Copying aapt2 to cache for permission fix...", LogLevel.INFO);
+                try (InputStream in = new FileInputStream(aapt2Binary);
+                     OutputStream out = new FileOutputStream(aapt2Cache)) {
+                    byte[] buffer = new byte[8192];
+                    int read;
+                    while ((read = in.read(buffer)) != -1) {
+                        out.write(buffer, 0, read);
+                    }
                 }
+                aapt2Cache.setExecutable(true, false);
+                cb.onLog("  ✓ aapt2 copied to cache with execute permission.", LogLevel.SUCCESS);
             }
 
-            // ✅ aapt2 ကို Process နဲ့ Run ပါ
+            // ✅ cache ထဲက aapt2 ကိုသုံးပါ
+            File aapt2ToUse = aapt2Cache.exists() ? aapt2Cache : aapt2Binary;
+
             List<String> command = new ArrayList<>();
-            command.add(aapt2Binary.getAbsolutePath());
+            command.add(aapt2ToUse.getAbsolutePath());
             for (String arg : args) {
                 command.add(arg);
             }
 
-            cb.onLog("  ℹ Running AAPT2 command...", LogLevel.INFO);
-
             ProcessBuilder pb = new ProcessBuilder(command);
             pb.redirectErrorStream(true);
             
-            // ✅ Oppo A17 အတွက် environment variables ထည့်ပါ
             Map<String, String> env = pb.environment();
             env.put("LD_LIBRARY_PATH", toolsDir.getAbsolutePath() + ":/system/lib64:/system/lib");
-            
+
+            cb.onLog("  ℹ Running AAPT2...", LogLevel.INFO);
             Process process = pb.start();
 
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
@@ -243,7 +241,7 @@ public class BuildManager {
         }
     }
 
-    // ✅ D8 + R8 Fallback System (Oppo A17 အတွက်)
+    // ✅ D8 + R8 Fallback System
     private boolean convertToDexWithFallback(File toolsDir, File androidJar, String intermediatesDex, 
                                                List<String> classFiles, BuildCallback cb) {
         
@@ -441,7 +439,7 @@ public class BuildManager {
                     return;
                 }
 
-                // ── Step 4: DEX Conversion with D8 + R8 Fallback ──────────
+                // ── Step 4: DEX Conversion ──────────────────────────────────
                 cb.onProgress("Converting to DEX…", 80);
                 cb.onLog("► [4/5] Converting class files to DEX via D8/R8…", LogLevel.INFO);
                 String intermediatesDex = buildDir + "/intermediates/dex";
@@ -720,4 +718,4 @@ public class BuildManager {
         }
         f.delete();
     }
-            }
+    }
