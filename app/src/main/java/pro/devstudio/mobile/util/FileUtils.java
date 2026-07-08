@@ -12,50 +12,77 @@ import java.util.zip.ZipOutputStream;
 
 public class FileUtils {
 
-    public static String readFile(File f) {
+    // ✅ readFile - throws IOException
+    public static String readFile(File f) throws IOException {
         StringBuilder sb = new StringBuilder();
         try (BufferedReader br = new BufferedReader(new FileReader(f))) {
             String line;
-            while ((line = br.readLine()) != null) sb.append(line).append('\n');
-        } catch (IOException e) { /* ignore */ }
+            while ((line = br.readLine()) != null) {
+                sb.append(line).append('\n');
+            }
+        }
         return sb.toString();
     }
 
+    // ✅ writeFile
     public static void writeFile(File f, String content) throws IOException {
-        f.getParentFile().mkdirs();
-        try (FileWriter fw = new FileWriter(f)) { fw.write(content); }
+        if (f.getParentFile() != null && !f.getParentFile().exists()) {
+            f.getParentFile().mkdirs();
+        }
+        try (FileWriter fw = new FileWriter(f)) {
+            fw.write(content);
+        }
     }
 
+    // ✅ deleteRecursive
     public static void deleteRecursive(File f) {
-        if (f.isDirectory()) for (File c : f.listFiles()) deleteRecursive(c);
+        if (f == null) return;
+        if (f.isDirectory()) {
+            File[] children = f.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    deleteRecursive(child);
+                }
+            }
+        }
         f.delete();
     }
 
-    /** Zip the entire directory into outputZip. */
+    // ✅ zipDirectory - fixed path
     public static File zipDirectory(File dir, File outputZip) throws IOException {
-        outputZip.getParentFile().mkdirs();
+        if (outputZip.getParentFile() != null && !outputZip.getParentFile().exists()) {
+            outputZip.getParentFile().mkdirs();
+        }
         try (ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(outputZip))) {
-            addToZip(dir, dir.getName() + "/", zos);
+            addToZip(dir, "", zos);
         }
         return outputZip;
     }
 
-    private static void addToZip(File f, String prefix, ZipOutputStream zos) throws IOException {
-        if (f.isDirectory()) {
-            File[] children = f.listFiles();
-            if (children == null) return;
-            for (File child : children) addToZip(child, prefix + child.getName() + (child.isDirectory() ? "/" : ""), zos);
-        } else {
-            zos.putNextEntry(new ZipEntry(prefix));
-            try (FileInputStream fis = new FileInputStream(f)) {
-                byte[] buf = new byte[8192];
-                int n;
-                while ((n = fis.read(buf)) != -1) zos.write(buf, 0, n);
+    // ✅ addToZip - fixed prefix
+    private static void addToZip(File dir, String basePath, ZipOutputStream zos) throws IOException {
+        File[] files = dir.listFiles();
+        if (files == null) return;
+        
+        for (File file : files) {
+            if (file.isDirectory()) {
+                addToZip(file, basePath + file.getName() + "/", zos);
+            } else {
+                String entryName = basePath + file.getName();
+                zos.putNextEntry(new ZipEntry(entryName));
+                try (FileInputStream fis = new FileInputStream(file)) {
+                    byte[] buffer = new byte[8192];
+                    int length;
+                    while ((length = fis.read(buffer)) != -1) {
+                        zos.write(buffer, 0, length);
+                    }
+                }
+                zos.closeEntry();
             }
-            zos.closeEntry();
         }
     }
 
+    // ✅ extensionOf
     public static String extensionOf(String filename) {
         int dot = filename.lastIndexOf('.');
         return dot >= 0 ? filename.substring(dot + 1).toLowerCase() : "";
