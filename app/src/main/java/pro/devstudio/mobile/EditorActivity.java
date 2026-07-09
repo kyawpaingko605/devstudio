@@ -270,25 +270,26 @@ public class EditorActivity extends AppCompatActivity {
         if (preferred != null) openFile(preferred);
     }
 
-    // ✅ IOException ကို try-catch နဲ့ handle လုပ်ထားပါ
+    // ✅ IOException ကို try-catch မသုံးတော့ဘူး (FileUtils ထဲမှာ handle လုပ်ပြီးသား)
     private void openFile(File file) {
-        try {
-            String path = file.getAbsolutePath();
-            if (!openFiles.containsKey(path)) {
-                String content = FileUtils.readFile(file);
+        String path = file.getAbsolutePath();
+        if (!openFiles.containsKey(path)) {
+            String content = FileUtils.readFile(file);
+            if (content != null) {
                 openFiles.put(path, content);
                 openPaths.add(getFileName(path));
                 openAbsPaths.add(path);
                 tabAdapter.notifyItemInserted(openPaths.size() - 1);
+            } else {
+                toast("Error reading file: " + file.getName());
+                return;
             }
-            int idx = openAbsPaths.indexOf(path);
-            switchToFile(path);
-            tabAdapter.setActive(idx);
-            binding.tabsRecycler.scrollToPosition(idx);
-            updateEditorLanguage(path);
-        } catch (IOException e) {
-            toast("Error opening file: " + e.getMessage());
         }
+        int idx = openAbsPaths.indexOf(path);
+        switchToFile(path);
+        tabAdapter.setActive(idx);
+        binding.tabsRecycler.scrollToPosition(idx);
+        updateEditorLanguage(path);
     }
 
     private void switchToFile(String path) {
@@ -428,7 +429,6 @@ public class EditorActivity extends AppCompatActivity {
         });
     }
 
-    // ✅ switch expressions ကို if-else နဲ့ အစားထိုးပါ
     private void appendBuildLog(String line, BuildManager.LogLevel level) {
         int color;
         if (level == BuildManager.LogLevel.SUCCESS) {
@@ -623,7 +623,6 @@ public class EditorActivity extends AppCompatActivity {
         return null;
     }
 
-    // ✅ switch expressions ကို if-else နဲ့ အစားထိုးပါ
     private String templateForFile(String name) {
         String ext = FileUtils.extensionOf(name);
         if (ext.equals("java")) {
