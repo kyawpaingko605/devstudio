@@ -46,12 +46,10 @@ public class MainActivity extends AppCompatActivity {
     private ProjectManager      manager;
     private List<Project>       projects;
 
-    // Accent palette for new project cards
     private static final String[] ACCENTS = {
             "#CBA6F7", "#89B4FA", "#A6E3A1", "#F38BA8", "#F9E2AF", "#94E2D5"
     };
 
-    // ── Folder Picker Launcher ──
     private final ActivityResultLauncher<Intent> folderPickerLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
             result -> {
@@ -73,9 +71,9 @@ public class MainActivity extends AppCompatActivity {
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
 
+        // ✅ build-tools ကို အရင်ဆုံး စစ်ဆေးပြီး extract လုပ်ပါ
         checkAndExtractTools();
 
-        // Edge-to-edge
         ViewCompat.setOnApplyWindowInsetsListener(binding.getRoot(), (v, insets) -> {
             var sysBar = insets.getInsets(WindowInsetsCompat.Type.systemBars());
             binding.recyclerView.setPadding(0, 0, 0, sysBar.bottom + 80);
@@ -118,91 +116,114 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    // ✅ Build Tools ဖြည်ချခြင်း
+    // ✅ Build Tools ဖြည်ချခြင်း (aapt2 ကို သေချာစစ်ပါ)
     private void checkAndExtractTools() {
         File internalToolsDir = new File(getFilesDir(), "build-tools");
+        File aapt2File = new File(internalToolsDir, "aapt2");
         
+        // ✅ aapt2 ရှိပြီးသားဆိုရင် ဘာမှမလုပ်ပါ
+        if (aapt2File.exists() && aapt2File.length() > 0) {
+            Log.i("DevStudio", "✅ aapt2 already exists: " + aapt2File.getAbsolutePath());
+            return;
+        }
+        
+        // ✅ aapt2 မရှိရင် extract လုပ်ပါ
         if (!internalToolsDir.exists()) {
             internalToolsDir.mkdirs();
-
-            ProgressDialog progressDialog = new ProgressDialog(this);
-            progressDialog.setTitle("System Setup");
-            progressDialog.setMessage("Initializing local build tools...");
-            progressDialog.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
-            progressDialog.setCancelable(false);
-            progressDialog.setMax(100);
-            progressDialog.show();
-
-            new Thread(() -> {
-                boolean success = false;
-                try {
-                    long totalSize = 0;
-                    try (InputStream testIs = getAssets().open("build-tools/build-tools.zip");
-                         ZipInputStream testZis = new ZipInputStream(testIs)) {
-                        ZipEntry ze;
-                        while ((ze = testZis.getNextEntry()) != null) {
-                            if (!ze.isDirectory()) {
-                                totalSize += ze.getSize();
-                            }
-                            testZis.closeEntry();
-                        }
-                    }
-
-                    if (totalSize <= 0) totalSize = 1;
-
-                    try (InputStream is = getAssets().open("build-tools/build-tools.zip");
-                         ZipInputStream zis = new ZipInputStream(new BufferedInputStream(is))) {
-                        
-                        ZipEntry entry;
-                        byte[] buffer = new byte[8192];
-                        long extractedBytes = 0;
-
-                        while ((entry = zis.getNextEntry()) != null) {
-                            File outputFile = new File(internalToolsDir, entry.getName());
-                            
-                            final String currentFileName = entry.getName();
-                            runOnUiThread(() -> progressDialog.setMessage("Extracting: " + currentFileName));
-
-                            if (entry.isDirectory()) {
-                                outputFile.mkdirs();
-                            } else {
-                                File parent = outputFile.getParentFile();
-                                if (parent != null && !parent.exists()) parent.mkdirs();
-
-                                try (FileOutputStream fos = new FileOutputStream(outputFile)) {
-                                    int len;
-                                    while ((len = zis.read(buffer)) != -1) {
-                                        fos.write(buffer, 0, len);
-                                        extractedBytes += len;
-                                        
-                                        int percent = (int) ((extractedBytes * 100) / totalSize);
-                                        runOnUiThread(() -> progressDialog.setProgress(Math.min(percent, 100)));
-                                    }
-                                }
-                                
-                                if (!entry.getName().endsWith(".jar") && !entry.getName().endsWith(".keystore")) {
-                                    outputFile.setExecutable(true, false);
-                                }
-                            }
-                            zis.closeEntry();
-                        }
-                        success = true;
-                    }
-                } catch (IOException e) {
-                    Log.e("DevStudio_Extract", "Extraction error: " + e.getMessage());
-                }
-
-                final boolean finalSuccess = success;
-                runOnUiThread(() -> {
-                    if (progressDialog.isShowing()) progressDialog.dismiss();
-                    if (finalSuccess) {
-                        Toast.makeText(MainActivity.this, "✓ System tools configured successfully!", Toast.LENGTH_SHORT).show();
-                    } else {
-                        Toast.makeText(MainActivity.this, "✗ Configuration failed! Please clear data and retry.", Toast.LENGTH_LONG).show();
-                    }
-                });
-            }).start();
         }
+
+        ProgressDialog progressDialog = new ProgressDialog(this);
+        progressDialog.setTitle("System Setup");
+        progressDialog.setMessage("Extracting build tools...");
+        progressDialog.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
+        progressDialog.setCancelable(false);
+        progressDialog.setMax(100);
+        progressDialog.show();
+
+        new Thread(() -> {
+            boolean success = false;
+            try {
+                // ✅ build-tools.zip ကို extract လုပ်ပါ
+                try (InputStream is = getAssets().open("build-tools/build-tools.zip");
+                     ZipInputStream zis = new ZipInputStream(new BufferedInputStream(is))) {
+                    
+                    ZipEntry entry;
+                    byte[] buffer = new byte[8192];
+                    int totalFiles = 0;
+                    int extractedFiles = 0;
+
+                    // Total files ကိုရေတွက်ပါ
+                    try (InputStream countIs = getAssets().open("build-tools/build-tools.zip");
+                         ZipInputStream countZis = new ZipInputStream(countIs)) {
+                        while (countZis.getNextEntry() != null) {
+                            if (!countZis.getNextEntry().isDirectory()) {
+                                totalFiles++;
+                            }
+                            countZis.closeEntry();
+                        }
+                    }
+                    if (totalFiles == 0) totalFiles = 1;
+
+                    while ((entry = zis.getNextEntry()) != null) {
+                        File outputFile = new File(internalToolsDir, entry.getName());
+                        
+                        if (entry.isDirectory()) {
+                            outputFile.mkdirs();
+                        } else {
+                            File parent = outputFile.getParentFile();
+                            if (parent != null && !parent.exists()) parent.mkdirs();
+
+                            try (FileOutputStream fos = new FileOutputStream(outputFile)) {
+                                int len;
+                                while ((len = zis.read(buffer)) != -1) {
+                                    fos.write(buffer, 0, len);
+                                }
+                            }
+                            
+                            // ✅ aapt2 အတွက် permission ပေးပါ
+                            if (entry.getName().equals("aapt2")) {
+                                outputFile.setExecutable(true, false);
+                                outputFile.setReadable(true, false);
+                                outputFile.setWritable(true, false);
+                                Log.i("DevStudio", "✅ aapt2 extracted: " + outputFile.getAbsolutePath());
+                            }
+                            
+                            if (!entry.getName().endsWith(".jar") && !entry.getName().endsWith(".keystore")) {
+                                outputFile.setExecutable(true, false);
+                            }
+                            
+                            extractedFiles++;
+                            final int percent = (extractedFiles * 100) / totalFiles;
+                            final String fileName = entry.getName();
+                            runOnUiThread(() -> {
+                                progressDialog.setProgress(Math.min(percent, 100));
+                                progressDialog.setMessage("Extracting: " + fileName);
+                            });
+                        }
+                        zis.closeEntry();
+                    }
+                    success = true;
+                }
+            } catch (IOException e) {
+                Log.e("DevStudio", "Extraction error: " + e.getMessage());
+                e.printStackTrace();
+            }
+
+            final boolean finalSuccess = success;
+            runOnUiThread(() -> {
+                if (progressDialog.isShowing()) progressDialog.dismiss();
+                
+                // ✅ aapt2 ရှိမရှိ ပြန်စစ်ပါ
+                File checkAapt2 = new File(internalToolsDir, "aapt2");
+                if (checkAapt2.exists() && checkAapt2.length() > 0) {
+                    Toast.makeText(MainActivity.this, "✓ System tools configured successfully!", Toast.LENGTH_SHORT).show();
+                    Log.i("DevStudio", "✅ aapt2 confirmed at: " + checkAapt2.getAbsolutePath());
+                } else {
+                    Toast.makeText(MainActivity.this, "✗ aapt2 not found! Please reinstall.", Toast.LENGTH_LONG).show();
+                    Log.e("DevStudio", "❌ aapt2 NOT found after extraction!");
+                }
+            });
+        }).start();
     }
 
     // ── New project ──────────────────────────────────────────────────────────
