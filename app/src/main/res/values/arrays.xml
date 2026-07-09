@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Editor Themes -->
+    <string-array name="editor_themes">
+        <item>Dark (Default)</item>
+        <item>Light</item>
+        <item>Catppuccin Mocha</item>
+        <item>Catppuccin Latte</item>
+        <item>One Dark</item>
+        <item>Solarized Dark</item>
+    </string-array>
+
+    <string-array name="editor_theme_values">
+        <item>dark</item>
+        <item>light</item>
+        <item>catppuccin_mocha</item>
+        <item>catppuccin_latte</item>
+        <item>one_dark</item>
+        <item>solarized_dark</item>
+    </string-array>
+
+    <!-- Accent Colors -->
+    <string-array name="accent_colors">
+        <item>Catppuccin Mauve</item>
+        <item>Catppuccin Blue</item>
+        <item>Catppuccin Green</item>
+        <item>Catppuccin Red</item>
+        <item>Catppuccin Yellow</item>
+        <item>Catppuccin Teal</item>
+        <item>Catppuccin Pink</item>
+        <item>Catppuccin Peach</item>
+    </string-array>
+
+    <string-array name="accent_color_values">
+        <item>#CBA6F7</item>
+        <item>#89B4FA</item>
+        <item>#A6E3A1</item>
+        <item>#F38BA8</item>
+        <item>#F9E2AF</item>
+        <item>#94E2D5</item>
+        <item>#F5C2E7</item>
+        <item>#FAB387</item>
+    </string-array>
+</resources>
