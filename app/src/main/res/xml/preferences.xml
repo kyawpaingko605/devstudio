@@ -12,6 +12,30 @@
             android:inputType="textPassword"
             app:useSimpleSummaryProvider="false" />
 
+        <!-- ✅ AI Model Selector -->
+        <ListPreference
+            android:key="gemini_model"
+            android:title="AI Model"
+            android:dialogTitle="Select AI Model"
+            android:positiveButtonText="Select"
+            android:negativeButtonText="Cancel"
+            android:summary="Select Gemini model for AI assistant"
+            app:useSimpleSummaryProvider="false" />
+
+        <!-- ✅ AI Auto-Fix -->
+        <SwitchPreferenceCompat
+            android:key="ai_auto_fix"
+            android:title="AI Auto-Fix"
+            android:summary="Automatically fix code errors using AI"
+            android:defaultValue="true" />
+
+        <!-- ✅ AI Chat History -->
+        <SwitchPreferenceCompat
+            android:key="ai_chat_history"
+            android:title="Chat History"
+            android:summary="Keep AI chat history between sessions"
+            android:defaultValue="true" />
+
     </PreferenceCategory>
 
     <!-- ── Editor ── -->
@@ -21,6 +45,8 @@
             android:key="editor_font_size"
             android:title="Font Size"
             android:defaultValue="14"
+            android:min="8"
+            android:max="24"
             android:summary="Current: %s sp"
             app:showSeekBarValue="true" />
 
@@ -31,10 +57,27 @@
             android:defaultValue="false" />
 
         <SwitchPreferenceCompat
+            android:key="line_numbers"
+            android:title="Show Line Numbers"
+            android:summary="Display line numbers in the editor"
+            android:defaultValue="true" />
+
+        <SwitchPreferenceCompat
             android:key="auto_save"
             android:title="Auto Save"
             android:summary="Automatically save files while you type"
             android:defaultValue="true" />
+
+        <!-- ✅ Editor Theme -->
+        <ListPreference
+            android:key="editor_theme"
+            android:title="Editor Theme"
+            android:dialogTitle="Select Editor Theme"
+            android:entries="@array/editor_themes"
+            android:entryValues="@array/editor_theme_values"
+            android:summary="Dark"
+            android:defaultValue="dark"
+            app:useSimpleSummaryProvider="false" />
 
     </PreferenceCategory>
 
@@ -47,15 +90,62 @@
             android:summary="Use pure black background (saves battery on OLED screens)"
             android:defaultValue="false" />
 
+        <!-- ✅ Accent Color -->
+        <ListPreference
+            android:key="accent_color"
+            android:title="Accent Color"
+            android:dialogTitle="Select Accent Color"
+            android:entries="@array/accent_colors"
+            android:entryValues="@array/accent_color_values"
+            android:summary="Catppuccin Mauve"
+            android:defaultValue="#CBA6F7"
+            app:useSimpleSummaryProvider="false" />
+
     </PreferenceCategory>
 
     <!-- ── Build ── -->
     <PreferenceCategory android:title="Build">
 
+        <!-- ✅ Build Debug Logs -->
+        <SwitchPreferenceCompat
+            android:key="build_debug_logs"
+            android:title="Debug Logs"
+            android:summary="Show detailed build logs during compilation"
+            android:defaultValue="true" />
+
+        <!-- ✅ Debug Signing -->
+        <SwitchPreferenceCompat
+            android:key="debug_signing"
+            android:title="Debug Signing"
+            android:summary="Use debug.keystore for signing APKs"
+            android:defaultValue="true" />
+
+        <!-- ✅ Auto Build -->
+        <SwitchPreferenceCompat
+            android:key="auto_build"
+            android:title="Auto Build"
+            android:summary="Automatically build APK when changes are saved"
+            android:defaultValue="false" />
+
+    </PreferenceCategory>
+
+    <!-- ── About ── -->
+    <PreferenceCategory android:title="About">
+
         <Preference
-            android:key="termux_info"
-            android:title="Termux Integration"
-            android:summary="Install Termux from F-Droid for APK compilation support" />
+            android:key="about_version"
+            android:title="DevStudio Mobile IDE"
+            android:summary="Version 1.0.0\nBuilt with ❤️ for Android developers" />
+
+        <Preference
+            android:key="about_github"
+            android:title="GitHub"
+            android:summary="github.com/kyawpaingk/devstudio" />
+
+        <Preference
+            android:key="about_license"
+            android:title="License"
+            android:summary="MIT License" />
 
     </PreferenceCategory>
 
