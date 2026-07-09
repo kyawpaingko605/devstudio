@@ -7,6 +7,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.concurrent.TimeUnit;
@@ -31,6 +32,23 @@ public class GeminiClient {
     private static final String PREF_API_KEY = "gemini_api_key";
     private static final String PREF_MODEL   = "gemini_model";
     private static final MediaType JSON      = MediaType.get("application/json; charset=utf-8");
+
+    // ✅ ရနိုင်တဲ့ Gemini မော်ဒယ်များ (Static)
+    public static final String[] AVAILABLE_MODELS = {
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+        "gemini-1.0-pro"
+    };
+
+    public static final String[] MODEL_DISPLAY_NAMES = {
+        "Gemini 2.0 Flash (Fast, Best)",
+        "Gemini 2.0 Flash Lite (Fast, Cheap)",
+        "Gemini 1.5 Flash (Balanced)",
+        "Gemini 1.5 Pro (Powerful)",
+        "Gemini 1.0 Pro (Legacy)"
+    };
 
     private static final String SYSTEM_PROMPT =
             "You are an expert Android developer assistant inside DevStudio Mobile IDE.\n" +
@@ -68,11 +86,47 @@ public class GeminiClient {
     public boolean hasApiKey()       { return !getApiKey().isEmpty(); }
     public void    saveApiKey(String k) { prefs().edit().putString(PREF_API_KEY, k.trim()).apply(); }
 
-    public String  getSelectedModel() { return prefs().getString(PREF_MODEL, "gemini-2.0-flash"); }
-    public void    saveSelectedModel(String model) { prefs().edit().putString(PREF_MODEL, model.trim()).apply(); }
+    public String  getSelectedModel() { 
+        String model = prefs().getString(PREF_MODEL, "gemini-2.0-flash");
+        if (!isValidModel(model)) {
+            model = "gemini-2.0-flash";
+            saveSelectedModel(model);
+        }
+        return model;
+    }
+    
+    public void    saveSelectedModel(String model) { 
+        if (isValidModel(model)) {
+            prefs().edit().putString(PREF_MODEL, model.trim()).apply();
+        }
+    }
+    
+    public boolean isValidModel(String model) {
+        for (String m : AVAILABLE_MODELS) {
+            if (m.equals(model)) return true;
+        }
+        return false;
+    }
+    
+    public List<String> getAvailableModels() {
+        List<String> list = new ArrayList<>();
+        for (String m : AVAILABLE_MODELS) {
+            list.add(m);
+        }
+        return list;
+    }
+    
+    // ✅ getModelDisplayName() method
+    public String getModelDisplayName(String model) {
+        for (int i = 0; i < AVAILABLE_MODELS.length; i++) {
+            if (AVAILABLE_MODELS[i].equals(model)) {
+                return MODEL_DISPLAY_NAMES[i];
+            }
+        }
+        return model;
+    }
 
     private String getApiUrl() {
-        // Fix: remove markdown-style link and return the proper REST endpoint
         return "https://generativelanguage.googleapis.com/v1beta/models/" + getSelectedModel() + ":generateContent?key=";
     }
 
@@ -138,13 +192,17 @@ public class GeminiClient {
                 @Override public void onResponse(Call call, Response response) throws IOException {
                     String bodyStr = response.body() != null ? response.body().string() : "";
                     if (!response.isSuccessful()) {
-                        // Include response body for better debugging
-                        String message = switch (response.code()) {
-                            case 400 -> "Invalid request / API key.";
-                            case 403 -> "API key not authorized. Enable Generative Language API.";
-                            case 429 -> "Rate limit hit — wait a moment and try again.";
-                            default  -> "API error " + response.code() + " - " + bodyStr;
-                        };
+                        String message;
+                        int code = response.code();
+                        if (code == 400) {
+                            message = "Invalid request / API key.";
+                        } else if (code == 403) {
+                            message = "API key not authorized. Enable Generative Language API.";
+                        } else if (code == 429) {
+                            message = "Rate limit hit — wait a moment and try again.";
+                        } else {
+                            message = "API error " + code + " - " + bodyStr;
+                        }
                         onError.accept(message);
                         return;
                     }
