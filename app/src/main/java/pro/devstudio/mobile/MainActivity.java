@@ -115,12 +115,16 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    // ✅ မနေ့က အလုပ်လုပ်နေတဲ့ checkAndExtractTools() မူရင်း
+    // ✅ checkAndExtractTools() - aapt2 ရှိပြီးသားဆိုရင်လည်း permission ပြန်ပေးပါ
     private void checkAndExtractTools() {
         File internalToolsDir = new File(getFilesDir(), "build-tools");
         File aapt2File = new File(internalToolsDir, "aapt2");
         
+        // ✅ aapt2 ရှိပြီးသားဆိုရင်လည်း permission ပြန်ပေးပါ
         if (aapt2File.exists() && aapt2File.length() > 0) {
+            aapt2File.setExecutable(true, false);
+            aapt2File.setReadable(true, false);
+            Log.i("DevStudio", "✅ aapt2 already exists, permission reset");
             return;
         }
 
@@ -206,6 +210,9 @@ public class MainActivity extends AppCompatActivity {
                 
                 File checkAapt2 = new File(internalToolsDir, "aapt2");
                 if (finalSuccess && checkAapt2.exists() && checkAapt2.length() > 0) {
+                    // ✅ permission ကိုထပ်ပေးပါ
+                    checkAapt2.setExecutable(true, false);
+                    checkAapt2.setReadable(true, false);
                     Toast.makeText(MainActivity.this, "✓ System tools configured successfully!", Toast.LENGTH_SHORT).show();
                 } else {
                     Toast.makeText(MainActivity.this, "✗ Configuration failed! Please clear data and retry.", Toast.LENGTH_LONG).show();
@@ -318,4 +325,4 @@ public class MainActivity extends AppCompatActivity {
     private void toast(String msg) {
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
     }
-}
+                                           }
