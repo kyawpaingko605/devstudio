@@ -52,9 +52,9 @@ public class EditorActivity extends AppCompatActivity {
     private File                   projectDir;
     private String                 projectName;
     private String                 accentColor;
-    private final Map<String,String> openFiles    = new LinkedHashMap<>(); // abs-path → content
-    private final List<String>       openPaths    = new ArrayList<>();    // display names (tab labels)
-    private final List<String>       openAbsPaths = new ArrayList<>();    // parallel: absolute paths
+    private final Map<String,String> openFiles    = new LinkedHashMap<>();
+    private final List<String>       openPaths    = new ArrayList<>();
+    private final List<String>       openAbsPaths = new ArrayList<>();
     private       String             currentPath;
 
     // Adapters
@@ -77,7 +77,6 @@ public class EditorActivity extends AppCompatActivity {
         binding = ActivityEditorBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
 
-        // Unpack intent
         projectName = getIntent().getStringExtra("project_name");
         accentColor = getIntent().getStringExtra("project_accent");
         projectDir  = new File(getIntent().getStringExtra("project_dir"));
@@ -94,7 +93,6 @@ public class EditorActivity extends AppCompatActivity {
         setupBuildPanel();
         setupFabs();
 
-        // Open first file
         openFirstFile();
     }
 
@@ -128,7 +126,6 @@ public class EditorActivity extends AppCompatActivity {
             return false;
         });
 
-        // Accent line under toolbar
         try {
             binding.accentLine.setBackgroundColor(Color.parseColor(accentColor));
         } catch (Exception e) {
@@ -172,7 +169,6 @@ public class EditorActivity extends AppCompatActivity {
         binding.codeEditor.setTextSize(14f);
         binding.codeEditor.setWordwrap(false);
 
-        // Dark color scheme
         EditorColorScheme scheme = binding.codeEditor.getColorScheme();
         scheme.setColor(EditorColorScheme.WHOLE_BACKGROUND,        0xFF1E1E2E);
         scheme.setColor(EditorColorScheme.LINE_NUMBER_BACKGROUND,  0xFF181825);
@@ -190,7 +186,6 @@ public class EditorActivity extends AppCompatActivity {
         binding.chatRecycler.setLayoutManager(new LinearLayoutManager(this));
         binding.chatRecycler.setAdapter(chatAdapter);
 
-        // Welcome message
         addAiMessage("👋 Hi! I'm your AI assistant.\n\n" +
                 "I can help you:\n• Fix bugs\n• Explain code\n• Generate snippets\n\n" +
                 "Use the shortcuts below or ask me anything!");
@@ -200,7 +195,6 @@ public class EditorActivity extends AppCompatActivity {
             sendChat(); return true;
         });
 
-        // Shortcut chips
         binding.chipFixCode.setOnClickListener(v -> {
             String code = binding.codeEditor.getText().toString();
             if (code.isEmpty()) { toast("Editor is empty."); return; }
@@ -271,34 +265,36 @@ public class EditorActivity extends AppCompatActivity {
     // ── File management ──────────────────────────────────────────────────────
 
     private void openFirstFile() {
-        // Open MainActivity.java or first available file
         File preferred = findFile(projectDir, "MainActivity.java");
         if (preferred == null) preferred = findFirstFile(projectDir);
         if (preferred != null) openFile(preferred);
     }
 
+    // ✅ IOException ကို try-catch နဲ့ handle လုပ်ထားပါ
     private void openFile(File file) {
-        String path = file.getAbsolutePath();
-        if (!openFiles.containsKey(path)) {
-            String content = FileUtils.readFile(file);
-            openFiles.put(path, content);
-            openPaths.add(getFileName(path));
-            openAbsPaths.add(path);            // keep parallel list in sync
-            tabAdapter.notifyItemInserted(openPaths.size() - 1);
+        try {
+            String path = file.getAbsolutePath();
+            if (!openFiles.containsKey(path)) {
+                String content = FileUtils.readFile(file);
+                openFiles.put(path, content);
+                openPaths.add(getFileName(path));
+                openAbsPaths.add(path);
+                tabAdapter.notifyItemInserted(openPaths.size() - 1);
+            }
+            int idx = openAbsPaths.indexOf(path);
+            switchToFile(path);
+            tabAdapter.setActive(idx);
+            binding.tabsRecycler.scrollToPosition(idx);
+            updateEditorLanguage(path);
+        } catch (IOException e) {
+            toast("Error opening file: " + e.getMessage());
         }
-        int idx = openAbsPaths.indexOf(path);  // index by abs-path, no collision risk
-        switchToFile(path);
-        tabAdapter.setActive(idx);
-        binding.tabsRecycler.scrollToPosition(idx);
-        updateEditorLanguage(path);
     }
 
     private void switchToFile(String path) {
-        // Save current
         if (currentPath != null && openFiles.containsKey(currentPath)) {
             openFiles.put(currentPath, binding.codeEditor.getText().toString());
         }
-        // Load new
         currentPath = path;
         String content = openFiles.getOrDefault(path, "");
         binding.codeEditor.setText(content);
@@ -432,13 +428,18 @@ public class EditorActivity extends AppCompatActivity {
         });
     }
 
+    // ✅ switch expressions ကို if-else နဲ့ အစားထိုးပါ
     private void appendBuildLog(String line, BuildManager.LogLevel level) {
-        int color = switch (level) {
-            case SUCCESS -> 0xFFA6E3A1;
-            case ERROR   -> 0xFFF38BA8;
-            case WARNING -> 0xFFF9E2AF;
-            default      -> 0xFFCDD6F4;
-        };
+        int color;
+        if (level == BuildManager.LogLevel.SUCCESS) {
+            color = 0xFFA6E3A1;
+        } else if (level == BuildManager.LogLevel.ERROR) {
+            color = 0xFFF38BA8;
+        } else if (level == BuildManager.LogLevel.WARNING) {
+            color = 0xFFF9E2AF;
+        } else {
+            color = 0xFFCDD6F4;
+        }
         SpannableString ss = new SpannableString(line + "\n");
         ss.setSpan(new ForegroundColorSpan(color), 0, ss.length(), 0);
         buildLog.append(ss);
@@ -593,8 +594,6 @@ public class EditorActivity extends AppCompatActivity {
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     private void updateEditorLanguage(String path) {
-        // JavaLanguage handles both .java and .xml reasonably
-        // In a full implementation we'd switch to XmlLanguage for .xml
         binding.codeEditor.setEditorLanguage(new JavaLanguage());
     }
 
@@ -624,18 +623,21 @@ public class EditorActivity extends AppCompatActivity {
         return null;
     }
 
+    // ✅ switch expressions ကို if-else နဲ့ အစားထိုးပါ
     private String templateForFile(String name) {
         String ext = FileUtils.extensionOf(name);
-        return switch (ext) {
-            case "java" -> "package com.example;\n\npublic class " +
-                           name.replace(".java","") + " {\n\n}\n";
-            case "xml"  -> "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
-                           "<LinearLayout xmlns:android=\"http://schemas.android.com/apk/res/android\"\n" +
-                           "    android:layout_width=\"match_parent\"\n" +
-                           "    android:layout_height=\"match_parent\"\n" +
-                           "    android:orientation=\"vertical\">\n\n</LinearLayout>\n";
-            default     -> "";
-        };
+        if (ext.equals("java")) {
+            return "package com.example;\n\npublic class " +
+                    name.replace(".java","") + " {\n\n}\n";
+        } else if (ext.equals("xml")) {
+            return "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
+                    "<LinearLayout xmlns:android=\"http://schemas.android.com/apk/res/android\"\n" +
+                    "    android:layout_width=\"match_parent\"\n" +
+                    "    android:layout_height=\"match_parent\"\n" +
+                    "    android:orientation=\"vertical\">\n\n</LinearLayout>\n";
+        } else {
+            return "";
+        }
     }
 
     private void hideKeyboard() {
