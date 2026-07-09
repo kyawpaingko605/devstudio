@@ -167,7 +167,7 @@ public class BuildManager {
         buildInternal(project, projectDir, cb, false);
     }
 
-    // ✅ No-root အတွက် aapt2 Process (files ဖိုဒါကိုပဲသုံးပါ - cache မသုံးပါ)
+    // ✅ No-root အတွက် aapt2 Process (cache ကိုသုံးပါ - permission ပြဿနာရှောင်ရန်)
     private int runAapt2Binary(String[] args, BuildCallback cb) {
         try {
             File toolsDir = new File(context.getFilesDir(), "build-tools");
@@ -178,15 +178,28 @@ public class BuildManager {
                 return -1;
             }
 
-            // ✅ aapt2 ကို execute လုပ်ခွင့်ရှိမရှိစစ်ပါ
-            if (!aapt2Binary.canExecute()) {
-                cb.onLog("  ℹ Setting execute permission for aapt2...", LogLevel.INFO);
-                aapt2Binary.setExecutable(true, false);
-                aapt2Binary.setReadable(true, false);
+            // ✅ aapt2 ကို cache ထဲ ကူးပြီး permission ပေးပါ (No-root အတွက်)
+            File aapt2Cache = new File(context.getCacheDir(), "aapt2");
+            if (!aapt2Cache.exists() || aapt2Cache.length() != aapt2Binary.length()) {
+                cb.onLog("  ℹ Copying aapt2 to cache for permission fix...", LogLevel.INFO);
+                try (InputStream in = new FileInputStream(aapt2Binary);
+                     OutputStream out = new FileOutputStream(aapt2Cache)) {
+                    byte[] buffer = new byte[8192];
+                    int read;
+                    while ((read = in.read(buffer)) != -1) {
+                        out.write(buffer, 0, read);
+                    }
+                }
+                aapt2Cache.setExecutable(true, false);
+                aapt2Cache.setReadable(true, false);
+                cb.onLog("  ✓ aapt2 copied to cache with execute permission.", LogLevel.SUCCESS);
             }
 
+            // ✅ cache ထဲက aapt2 ကိုသုံးပါ
+            File aapt2ToUse = aapt2Cache.exists() ? aapt2Cache : aapt2Binary;
+
             List<String> command = new ArrayList<>();
-            command.add(aapt2Binary.getAbsolutePath());
+            command.add(aapt2ToUse.getAbsolutePath());
             for (String arg : args) {
                 command.add(arg);
             }
@@ -710,4 +723,4 @@ public class BuildManager {
         }
         f.delete();
     }
-    }
+            }
