@@ -12,19 +12,24 @@ import java.util.zip.ZipOutputStream;
 
 public class FileUtils {
 
-    // ✅ readFile - throws IOException
-    public static String readFile(File f) throws IOException {
-        StringBuilder sb = new StringBuilder();
-        try (BufferedReader br = new BufferedReader(new FileReader(f))) {
-            String line;
-            while ((line = br.readLine()) != null) {
-                sb.append(line).append('\n');
+    // ✅ readFile - IOException ကို handle လုပ်ပြီး null ပြန်ပါ
+    public static String readFile(File f) {
+        try {
+            StringBuilder sb = new StringBuilder();
+            try (BufferedReader br = new BufferedReader(new FileReader(f))) {
+                String line;
+                while ((line = br.readLine()) != null) {
+                    sb.append(line).append('\n');
+                }
             }
+            return sb.toString();
+        } catch (IOException e) {
+            // ✅ exception ကို handle လုပ်ပြီး null ပြန်ပါ
+            return null;
         }
-        return sb.toString();
     }
 
-    // ✅ writeFile
+    // ✅ writeFile - throws IOException
     public static void writeFile(File f, String content) throws IOException {
         if (f.getParentFile() != null && !f.getParentFile().exists()) {
             f.getParentFile().mkdirs();
@@ -48,7 +53,7 @@ public class FileUtils {
         f.delete();
     }
 
-    // ✅ zipDirectory - fixed path
+    // ✅ zipDirectory
     public static File zipDirectory(File dir, File outputZip) throws IOException {
         if (outputZip.getParentFile() != null && !outputZip.getParentFile().exists()) {
             outputZip.getParentFile().mkdirs();
@@ -59,7 +64,7 @@ public class FileUtils {
         return outputZip;
     }
 
-    // ✅ addToZip - fixed prefix
+    // ✅ addToZip
     private static void addToZip(File dir, String basePath, ZipOutputStream zos) throws IOException {
         File[] files = dir.listFiles();
         if (files == null) return;
