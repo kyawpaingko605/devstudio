@@ -11,16 +11,14 @@ import java.io.IOException;
 import java.io.InputStream;
 
 /**
- * Small helper to install native executables placed under assets/build-tools/
- *
+ * Helper to install build tools from assets/build-tools/
+ * 
  * Usage:
- * - Put per-ABI binaries in app/src/main/assets/build-tools/arm64-v8a/toolname
- *   app/src/main/assets/build-tools/armeabi-v7a/toolname
- *   etc.
+ * - Put all build tools in app/src/main/assets/build-tools/
  * - On app start call ToolInstaller.installAllFromAssets(context)
- *
- * This will copy the first matching binary for the device ABI into
- * the app's internal files directory (files/build-tools/) and make it executable.
+ * 
+ * This will copy all files from assets/build-tools/ to files/build-tools/
+ * and make executables (like aapt2) executable.
  */
 public final class ToolInstaller {
     private static final String TAG = "ToolInstaller";
@@ -30,35 +28,32 @@ public final class ToolInstaller {
     public static void installAllFromAssets(Context ctx) {
         AssetManager am = ctx.getAssets();
         String base = "build-tools";
+        File outDir = new File(ctx.getFilesDir(), "build-tools");
+        
+        // ✅ outDir ကိုဖန်တီးပါ
+        if (!outDir.exists()) {
+            outDir.mkdirs();
+        }
 
         try {
-            String[] abis = Build.SUPPORTED_ABIS;
             boolean anyInstalled = false;
-
-            for (String abi : abis) {
-                String path = base + "/" + abi;
-                try {
-                    String[] files = am.list(path);
-                    if (files == null || files.length == 0) continue;
-                    for (String name : files) {
-                        boolean ok = copyAssetToFiles(ctx, path + "/" + name, name);
-                        if (ok) anyInstalled = true;
+            
+            // ✅ assets/build-tools/ ထဲက ဖိုင်တွေကိုရှာပါ
+            String[] files = am.list(base);
+            if (files != null && files.length > 0) {
+                for (String name : files) {
+                    // ✅ aapt2_mobile.zip ကိုကျော်ပါ (0 bytes)
+                    if (name.equals("aapt2_mobile.zip")) {
+                        Log.i(TAG, "Skipping " + name + " (empty file)");
+                        continue;
                     }
-                } catch (IOException ignored) {
-                    // directory not present for this abi
+                    
+                    String assetPath = base + "/" + name;
+                    boolean ok = copyAssetToFiles(ctx, assetPath, name, outDir);
+                    if (ok) anyInstalled = true;
                 }
-            }
-
-            if (!anyInstalled) {
-                try {
-                    String[] files = am.list(base);
-                    if (files != null) {
-                        for (String name : files) {
-                            boolean ok = copyAssetToFiles(ctx, base + "/" + name, name);
-                            if (ok) anyInstalled = true;
-                        }
-                    }
-                } catch (IOException ignored) {}
+            } else {
+                Log.w(TAG, "No files found in assets/build-tools/");
             }
 
             Log.i(TAG, "installAllFromAssets completed, anyInstalled=" + anyInstalled);
@@ -67,33 +62,41 @@ public final class ToolInstaller {
         }
     }
 
-    private static boolean copyAssetToFiles(Context ctx, String assetPath, String outName) {
+    private static boolean copyAssetToFiles(Context ctx, String assetPath, String outName, File outDir) {
         AssetManager am = ctx.getAssets();
-        File outDir = new File(ctx.getFilesDir(), "build-tools");
-        if (!outDir.exists()) outDir.mkdirs();
         File out = new File(outDir, outName);
 
         try (InputStream is = am.open(assetPath);
              FileOutputStream os = new FileOutputStream(out)) {
+            
+            // ✅ ဖိုင်ကို copy လုပ်ပါ
             byte[] buf = new byte[8192];
             int r;
-            while ((r = is.read(buf)) > 0) os.write(buf, 0, r);
+            long totalBytes = 0;
+            while ((r = is.read(buf)) > 0) {
+                os.write(buf, 0, r);
+                totalBytes += r;
+            }
             os.getFD().sync();
-
-            // ✅ aapt2 အတွက် executable permission ပေးပါ
-            boolean execSet = out.setExecutable(true, false);
             
-            // ✅ aapt2 ဆိုရင် read permission ပါပေးပါ
-            if (outName.equals("aapt2")) {
+            Log.i(TAG, "Copied " + assetPath + " → " + out.getAbsolutePath() + " (" + totalBytes + " bytes)");
+
+            // ✅ aapt2 နဲ့ non-jar/non-keystore ဖိုင်တွေကို executable ဖြစ်အောင်လုပ်ပါ
+            boolean isExecutable = !outName.endsWith(".jar") && 
+                                   !outName.endsWith(".keystore") && 
+                                   !outName.endsWith(".txt") &&
+                                   !outName.endsWith(".aar");
+            
+            if (isExecutable || outName.equals("aapt2")) {
+                out.setExecutable(true, false);
                 out.setReadable(true, false);
                 out.setWritable(true, false);
-                Log.i(TAG, "✅ aapt2 installed at: " + out.getAbsolutePath());
+                Log.i(TAG, "✅ Set executable permission for: " + outName);
             }
             
-            Log.i(TAG, "Installed tool: " + out.getAbsolutePath() + ", executable=" + execSet);
             return true;
         } catch (IOException e) {
-            Log.w(TAG, "Failed to copy " + assetPath, e);
+            Log.w(TAG, "Failed to copy " + assetPath + ": " + e.getMessage());
             return false;
         }
     }
