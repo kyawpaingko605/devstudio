@@ -11,16 +11,16 @@ import java.io.IOException;
 import java.io.InputStream;
 
 /**
- * Small helper to install native executables placed under assets/tools/<abi>/
+ * Small helper to install native executables placed under assets/build-tools/
  *
  * Usage:
- * - Put per-ABI binaries in app/src/main/assets/tools/arm64-v8a/toolname
- *   app/src/main/assets/tools/armeabi-v7a/toolname
+ * - Put per-ABI binaries in app/src/main/assets/build-tools/arm64-v8a/toolname
+ *   app/src/main/assets/build-tools/armeabi-v7a/toolname
  *   etc.
  * - On app start call ToolInstaller.installAllFromAssets(context)
  *
  * This will copy the first matching binary for the device ABI into
- * the app's internal files directory (files/tools/) and make it executable.
+ * the app's internal files directory (files/build-tools/) and make it executable.
  */
 public final class ToolInstaller {
     private static final String TAG = "ToolInstaller";
@@ -29,7 +29,7 @@ public final class ToolInstaller {
 
     public static void installAllFromAssets(Context ctx) {
         AssetManager am = ctx.getAssets();
-        String base = "build-tools";  // ✅ build-tools ပြောင်းပါ
+        String base = "build-tools";
 
         try {
             String[] abis = Build.SUPPORTED_ABIS;
@@ -69,7 +69,7 @@ public final class ToolInstaller {
 
     private static boolean copyAssetToFiles(Context ctx, String assetPath, String outName) {
         AssetManager am = ctx.getAssets();
-        File outDir = new File(ctx.getFilesDir(), "build-tools");  // ✅ build-tools
+        File outDir = new File(ctx.getFilesDir(), "build-tools");
         if (!outDir.exists()) outDir.mkdirs();
         File out = new File(outDir, outName);
 
@@ -80,8 +80,16 @@ public final class ToolInstaller {
             while ((r = is.read(buf)) > 0) os.write(buf, 0, r);
             os.getFD().sync();
 
-            // ✅ No-root အတွက် setExecutable() ကိုပဲသုံး
+            // ✅ aapt2 အတွက် executable permission ပေးပါ
             boolean execSet = out.setExecutable(true, false);
+            
+            // ✅ aapt2 ဆိုရင် read permission ပါပေးပါ
+            if (outName.equals("aapt2")) {
+                out.setReadable(true, false);
+                out.setWritable(true, false);
+                Log.i(TAG, "✅ aapt2 installed at: " + out.getAbsolutePath());
+            }
+            
             Log.i(TAG, "Installed tool: " + out.getAbsolutePath() + ", executable=" + execSet);
             return true;
         } catch (IOException e) {
@@ -89,4 +97,4 @@ public final class ToolInstaller {
             return false;
         }
     }
-                   }
+}
