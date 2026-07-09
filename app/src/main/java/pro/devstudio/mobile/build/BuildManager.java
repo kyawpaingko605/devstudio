@@ -167,15 +167,6 @@ public class BuildManager {
         buildInternal(project, projectDir, cb, false);
     }
 
-    private void prepareLocalTools(BuildCallback cb) throws IOException {
-        File jarToolsDir = new File(context.getFilesDir(), "build-tools");
-        if (!jarToolsDir.exists()) {
-            cb.onLog("  ✗ Critical: Build tools not found! Please restart the app.", LogLevel.ERROR);
-            throw new IOException("Build tools directory missing.");
-        }
-        cb.onLog("  ✓ Internal build-tools verified successfully.", LogLevel.SUCCESS);
-    }
-
     // ✅ No-root အတွက် aapt2 Process (cache ထဲ copy လုပ်ပြီး permission ပေးတယ်)
     private int runAapt2Binary(String[] args, BuildCallback cb) {
         try {
@@ -200,6 +191,7 @@ public class BuildManager {
                     }
                 }
                 aapt2Cache.setExecutable(true, false);
+                aapt2Cache.setReadable(true, false);
                 cb.onLog("  ✓ aapt2 copied to cache with execute permission.", LogLevel.SUCCESS);
             }
 
@@ -216,9 +208,10 @@ public class BuildManager {
             pb.redirectErrorStream(true);
             
             Map<String, String> env = pb.environment();
-            env.put("LD_LIBRARY_PATH", toolsDir.getAbsolutePath() + ":/system/lib64:/system/lib");
+            String nativeLibDir = context.getApplicationInfo().nativeLibraryDir;
+            env.put("LD_LIBRARY_PATH", nativeLibDir + ":/system/lib64:/system/lib");
 
-            cb.onLog("  ℹ Running AAPT2...", LogLevel.INFO);
+            cb.onLog("  ℹ Running AAPT2 command...", LogLevel.INFO);
             Process process = pb.start();
 
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
@@ -229,7 +222,9 @@ public class BuildManager {
             }
 
             int exitCode = process.waitFor();
-            cb.onLog("  ℹ AAPT2 exit code: " + exitCode, LogLevel.INFO);
+            if (exitCode != 0) {
+                cb.onLog("  ✗ AAPT2 process exited with code: " + exitCode, LogLevel.ERROR);
+            }
             return exitCode;
 
         } catch (IOException e) {
@@ -239,6 +234,15 @@ public class BuildManager {
             cb.onLog("  ✗ AAPT2 Exec Engine Exception: " + e.getMessage(), LogLevel.ERROR);
             return -1;
         }
+    }
+
+    private void prepareLocalTools(BuildCallback cb) throws IOException {
+        File jarToolsDir = new File(context.getFilesDir(), "build-tools");
+        if (!jarToolsDir.exists()) {
+            cb.onLog("  ✗ Critical: Build tools not found! Please restart the app.", LogLevel.ERROR);
+            throw new IOException("Build tools directory missing.");
+        }
+        cb.onLog("  ✓ Internal build-tools verified successfully.", LogLevel.SUCCESS);
     }
 
     // ✅ D8 + R8 Fallback System
@@ -438,6 +442,7 @@ public class BuildManager {
                     }
                     return;
                 }
+                cb.onLog("  ✓ Java code compiled successfully.", LogLevel.SUCCESS);
 
                 // ── Step 4: DEX Conversion ──────────────────────────────────
                 cb.onProgress("Converting to DEX…", 80);
@@ -718,4 +723,4 @@ public class BuildManager {
         }
         f.delete();
     }
-    }
+}
